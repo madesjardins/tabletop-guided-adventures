@@ -1,4 +1,5 @@
 opencv-python
+cv2-enumerate-cameras
 pyside6
 numpy
 vosk
