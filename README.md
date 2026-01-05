@@ -1,6 +1,6 @@
-# tabletop-guided-adventures
+## Overview
 
-TTGA (Tabletop Guided Adventures) uses a virtual narrator to guide players through interactive storytelling sessions. The narrator uses at least one webcam to understand the game state and a projector to visually display its moves or storytelling elements.
+This project aims to create an immersive tabletop gaming experience where a virtual narrator assists players in their adventures, enhancing traditional tabletop RPG solo sessions. The narrator uses at least one webcam to understand the game state and a projector to visually display its moves and storytelling elements.
 
 # Installation
 

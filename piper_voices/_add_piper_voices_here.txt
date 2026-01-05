@@ -1,0 +1,53 @@
+# How to Download Piper Voices
+
+This folder contains Piper TTS voice models. Voice models are not included in the repository
+due to their large file size.
+
+## Downloading Voices
+
+### Method 1: Using Python (Recommended)
+
+You can download voices directly in the current directory using the piper-tts Python package:
+
+```bash
+cd piper_voices
+python -m piper.download_voices en_US-lessac-medium
+```
+
+Replace `en_US-lessac-medium` with your desired voice name.
+
+### Method 2: Manual Download
+
+1. Visit the Piper voices repository:
+   https://huggingface.co/rhasspy/piper-voices/tree/main
+
+2. Navigate to the language and voice you want (e.g., `en/en_US/lessac/medium/`)
+
+3. Download BOTH files for each voice:
+   - `*.onnx` - The voice model file
+   - `*.onnx.json` - The voice configuration file
+
+4. Save both files in this `piper_voices` folder
+
+## Available Voices
+
+Browse all available voices at:
+https://rhasspy.github.io/piper-samples/
+
+You can listen to samples of each voice before downloading.
+
+## Example Voice Names
+
+- en_US-lessac-medium
+- en_GB-cori-medium
+- en_US-amy-medium
+- en_US-danny-low
+- And many more in various languages!
+
+## Requirements
+
+Each voice requires TWO files with the same base name:
+- `voice_name.onnx`
+- `voice_name.onnx.json`
+
+Both files must be present in this folder for the voice to work with the test scripts.
