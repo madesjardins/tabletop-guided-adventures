@@ -1,0 +1,7 @@
+opencv-python
+pyside6
+numpy
+vosk
+pyboof
+piper-tts
+pygame
