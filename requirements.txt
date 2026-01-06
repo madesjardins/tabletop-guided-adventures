@@ -6,3 +6,5 @@ vosk
 pyboof
 piper-tts
 pygame
+sounddevice
+python-Levenshtein

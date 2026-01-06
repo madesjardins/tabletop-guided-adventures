@@ -214,6 +214,10 @@ piper_voices/*
 tests/images/*
 !tests/images/_add_calibration_images_here.txt
 
+# Vosk models - ignore everything except _add_vosk_models_here.txt
+vosk_models/*
+!vosk_models/_add_vosk_models_here.txt
+
 # Temp stuff
 temp/
 tmp/
