@@ -1,0 +1,47 @@
+# Test Images
+
+This directory should contain test images for various integration tests.
+
+## Download Test Images
+
+Download all test images from the following Google Drive folder:
+
+https://drive.google.com/drive/folders/1hNMYz9KV5h4m3BCLkFu0OBJlWMcWAwb7?usp=drive_link
+
+## Available Test Images
+
+Place all files from the Google Drive folder into this `tests/images` directory. The following test images are available:
+
+### Camera Calibration Images
+
+- `calibration_top.jpg` - Top view of the checkerboard
+- `calibration_front.jpg` - Front view of the checkerboard
+- `calibration_side.jpg` - Side view of the checkerboard
+
+**Checkerboard Specifications:**
+- Width: 23 squares
+- Height: 18 squares
+- Internal corners detected: 22 x 17 = 374 corners
+
+**Usage:**
+```bash
+python tests/test_camera_calibration_integration.py
+```
+
+### QR Detection Images
+
+- `qr_detection.jpg` - Image containing MicroQR codes for detection testing
+
+**Usage:**
+```bash
+python tests/test_qr_detection_integration.py
+```
+
+This will detect MicroQR codes and save the result to `qr_detection_detected.jpg`.
+
+## Adding New Test Images
+
+When adding new test images:
+1. Upload them to the shared Google Drive folder
+2. Update this file with the new image names and their purpose
+3. Update the corresponding integration test documentation
