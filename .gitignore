@@ -210,6 +210,10 @@ __marimo__/
 piper_voices/*
 !piper_voices/_add_piper_voices_here.txt
 
+# Test calibration images - ignore everything except _add_calibration_images_here.txt
+tests/images/*
+!tests/images/_add_calibration_images_here.txt
+
 # Temp stuff
 temp/
 tmp/

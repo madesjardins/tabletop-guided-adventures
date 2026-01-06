@@ -1,0 +1,34 @@
+# Camera Calibration Images
+
+This directory should contain camera calibration images for testing the calibration module.
+
+## Download Calibration Images
+
+Download all calibration images from the following Google Drive folder:
+
+https://drive.google.com/drive/folders/1hNMYz9KV5h4m3BCLkFu0OBJlWMcWAwb7?usp=drive_link
+
+## Required Files
+
+Place all files from the Google Drive folder into this `tests/images` directory. The calibration test expects the following images:
+
+- `calibration_top.jpg` - Top view of the checkerboard
+- `calibration_front.jpg` - Front view of the checkerboard
+- `calibration_side.jpg` - Side view of the checkerboard
+
+## Checkerboard Specifications
+
+The default checkerboard configuration is:
+- Width: 23 squares
+- Height: 18 squares
+- Internal corners detected: 22 x 17 = 374 corners
+
+## Usage
+
+After downloading the images, run the calibration integration test:
+
+```bash
+python tests/test_camera_calibration_integration.py
+```
+
+This will detect corners in all three views and perform full camera calibration.

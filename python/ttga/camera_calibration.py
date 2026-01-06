@@ -48,13 +48,11 @@ class CalibrationFrame:
         number_of_squares_h: Number of squares in checkerboard height.
         image: The captured image as numpy array.
         corners: List of detected checkerboard corner coordinates.
-        mean_reprojection_error: Mean reprojection error for this data.
     """
     number_of_squares_w: int
     number_of_squares_h: int
     image: np.ndarray
     corners: np.ndarray
-    mean_reprojection_error: float
 
 
 @dataclass
@@ -66,11 +64,13 @@ class CameraCalibrationData:
         dist: Distortion coefficients.
         rvecs_list: List of rotation vectors for each calibration frame.
         tvecs_list: List of translation vectors for each calibration frame.
+        mean_reprojection_error: Mean reprojection error for this data.
     """
     mtx: np.ndarray
     dist: np.ndarray
     rvecs_list: list[np.ndarray]
     tvecs_list: list[np.ndarray]
+    mean_reprojection_error: float
 
 
 class CalibrationResult:
@@ -146,7 +146,7 @@ class CameraCalibration:
         """Get 3D reference points for checkerboard corners.
 
         Returns a row-major matrix of square corner intersection coordinates where
-        X and Y correspond to column and row indices, and Z is always 0.0.
+        X and Y correspond to column and negative row indices, and Z is always 0.0.
 
         Returns:
             List of rows, where each row contains tuples of (x, y, z) coordinates.
@@ -156,7 +156,7 @@ class CameraCalibration:
             >>> points = calibration.get_checkerboard_3d_reference_points()
             >>> # Returns 2x2 grid of corner intersections:
             >>> # [[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)],
-            >>> #  [(0.0, 1.0, 0.0), (1.0, 1.0, 0.0)]]
+            >>> #  [(0.0, -1.0, 0.0), (1.0, -1.0, 0.0)]]
         """
         points: list[list[tuple[float, float, float]]] = []
 
@@ -167,7 +167,7 @@ class CameraCalibration:
         for row in range(corners_h):
             row_points: list[tuple[float, float, float]] = []
             for col in range(corners_w):
-                row_points.append((float(col), float(row), 0.0))
+                row_points.append((float(col), -float(row), 0.0))
             points.append(row_points)
 
         return points
@@ -298,9 +298,9 @@ class CameraCalibration:
             object_points.append(objp)
 
             # Refine corner positions with subpixel accuracy
-            gray_frame = cv.cvtColor(frame.image, cv.COLOR_BGR2GRAY)
+            # Note: frame.image is already grayscale from make_calibration_frame
             refined_corners = cv.cornerSubPix(
-                gray_frame,
+                frame.image,
                 frame.corners,
                 (11, 11),
                 (-1, -1),
@@ -324,16 +324,16 @@ class CameraCalibration:
         if not ret:
             return None
 
-        mean_error = 0
+        reprojection_error = 0
         for i in range(len(object_points)):
             projected_image_points, _ = cv.projectPoints(object_points[i], rvecs[i], tvecs[i], mtx, dist)
             error = cv.norm(image_points[i], projected_image_points, cv.NORM_L2) / len(projected_image_points)
-            mean_error += error
+            reprojection_error += error
 
         return CameraCalibrationData(
             mtx=mtx,
             dist=dist,
             rvecs_list=rvecs,
             tvecs_list=tvecs,
-            mean_error=mean_error / len(object_points)
+            mean_reprojection_error=reprojection_error / len(object_points)
         )
