@@ -31,3 +31,14 @@ Download camera calibration test images from:
 https://drive.google.com/drive/folders/1hNMYz9KV5h4m3BCLkFu0OBJlWMcWAwb7?usp=drive_link
 
 Place all files from the Google Drive folder into the `tests/images/` directory. These images are required for running the camera calibration integration tests.
+
+### Vosk Speech Recognition Models
+
+Download Vosk models for voice recognition functionality from:
+https://alphacephei.com/vosk/models
+
+See `vosk_models/_add_vosk_models_here.txt` for detailed instructions. Recommended models:
+- **vosk-model-small-en-us-0.15** (40 MB) - Lightweight, good for testing
+- **vosk-model-en-us-0.22** (1.8 GB) - Full-featured, better accuracy
+
+Download and extract the model(s) directly into the `vosk_models/` directory.

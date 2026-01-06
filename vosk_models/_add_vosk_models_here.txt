@@ -1,0 +1,57 @@
+# Vosk Speech Recognition Models
+
+This directory should contain Vosk speech recognition models for voice recognition functionality.
+
+## Download Vosk Models
+
+Download Vosk models from the official website:
+
+https://alphacephei.com/vosk/models
+
+## Recommended Models
+
+For English speech recognition, we recommend:
+
+- **vosk-model-small-en-us-0.15** (40 MB) - Lightweight model, good for testing
+
+For other languages, check the Vosk models page for available options.
+
+## Installation Instructions
+
+1. Download the desired model(s) from the link above
+2. Extract the downloaded archive (usually a .zip file)
+3. Place the extracted folder(s) directly in this `vosk_models` directory
+
+Example structure:
+```
+vosk_models/
+├── _add_vosk_models_here.txt (this file)
+├── vosk-model-small-en-us-0.15/
+│   ├── am/
+│   ├── conf/
+│   ├── graph/
+│   └── ivector/
+└── vosk-model-en-us-0.22/
+    ├── am/
+    ├── conf/
+    ├── graph/
+    └── ivector/
+```
+
+## Usage
+
+After downloading and extracting models, run the voice recognition integration test:
+
+```bash
+python tests/test_voice_recognition_integration.py
+```
+
+The test application will automatically detect all available models and allow you to select which one to use.
+
+## Model Selection
+
+- **Small models** (~40 MB): Fast, lower accuracy, good for testing and development
+- **Medium models** (~100-300 MB): Balanced speed and accuracy
+- **Large models** (1-2 GB): Best accuracy, slower processing
+
+Choose based on your accuracy requirements and available system resources.
