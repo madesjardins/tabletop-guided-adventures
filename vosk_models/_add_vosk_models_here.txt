@@ -12,7 +12,7 @@ https://alphacephei.com/vosk/models
 
 For English speech recognition, we recommend:
 
-- **vosk-model-small-en-us-0.15** (40 MB) - Lightweight model, good for testing
+- **vosk-model-small-en-us-0.15** (40 MB) - Lightweight model
 
 For other languages, check the Vosk models page for available options.
 
