@@ -38,7 +38,6 @@ Download Vosk models for voice recognition functionality from:
 https://alphacephei.com/vosk/models
 
 See `vosk_models/_add_vosk_models_here.txt` for detailed instructions. Recommended models:
-- **vosk-model-small-en-us-0.15** (40 MB) - Lightweight, good for testing
-- **vosk-model-en-us-0.22** (1.8 GB) - Full-featured, better accuracy
+- **vosk-model-small-en-us-0.15** (40 MB) - Lightweight
 
 Download and extract the model(s) directly into the `vosk_models/` directory.
