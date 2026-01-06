@@ -125,7 +125,8 @@ class CameraManager(QtCore.QObject):
         # Get camera
         camera = self._cameras[name]
 
-        # Release camera resources
+        # Stop and release camera resources
+        camera.stop()
         camera.release()
 
         # Remove from dictionary

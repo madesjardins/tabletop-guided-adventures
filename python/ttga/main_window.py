@@ -115,6 +115,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Camera list
         self.camera_list = QtWidgets.QListWidget()
         self.camera_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.camera_list.itemSelectionChanged.connect(self._on_camera_selection_changed)
         layout.addWidget(self.camera_list)
 
         # Buttons in 2x2 grid
@@ -126,6 +127,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.delete_camera_button = QtWidgets.QPushButton("Delete")
         self.delete_camera_button.clicked.connect(self._on_delete_camera)
+        self.delete_camera_button.setEnabled(False)
         button_layout.addWidget(self.delete_camera_button, 0, 1)
 
         self.load_camera_button = QtWidgets.QPushButton("Load")
@@ -258,7 +260,46 @@ class MainWindow(QtWidgets.QMainWindow):
     @QtCore.Slot()
     def _on_delete_camera(self) -> None:
         """Handle delete camera button click."""
-        pass
+        # Get selected items
+        selected_items = self.camera_list.selectedItems()
+        if not selected_items:
+            return
+
+        # Get camera names
+        camera_names = [item.text() for item in selected_items]
+
+        # Confirm deletion
+        if len(camera_names) == 1:
+            message = f"Are you sure you want to delete camera '{camera_names[0]}'?"
+        else:
+            message = f"Are you sure you want to delete {len(camera_names)} cameras?"
+
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Delete Camera(s)",
+            message,
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No
+        )
+
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            # Remove cameras
+            for camera_name in camera_names:
+                try:
+                    self.core.camera_manager.remove_camera(camera_name)
+                except Exception as e:
+                    QtWidgets.QMessageBox.critical(
+                        self,
+                        "Error Deleting Camera",
+                        f"Failed to delete camera '{camera_name}': {str(e)}"
+                    )
+
+    @QtCore.Slot()
+    def _on_camera_selection_changed(self) -> None:
+        """Handle camera list selection change."""
+        # Enable delete button only if at least one camera is selected
+        has_selection = len(self.camera_list.selectedItems()) > 0
+        self.delete_camera_button.setEnabled(has_selection)
 
     @QtCore.Slot()
     def _on_load_camera(self) -> None:
