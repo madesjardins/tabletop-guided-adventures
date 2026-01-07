@@ -137,6 +137,7 @@ class CameraFeed(QObject):
         device_id: int = 0,
         capture_api: int = cv.CAP_DSHOW,
         capture_properties: Optional[dict[int, int | float]] = None,
+        camera_info: Optional[dict[str, any]] = None,
         parent: Optional[QObject] = None
     ) -> None:
         """Initialize the camera feed.
@@ -147,12 +148,14 @@ class CameraFeed(QObject):
             capture_properties: Optional dictionary of OpenCV capture properties.
                 If provided, these override the defaults. Missing properties will
                 use values from DEFAULT_CAPTURE_PROPERTIES (default: None).
+            camera_info: Optional camera info dict with 'index', 'name', 'path' keys.
             parent: Optional parent QObject for Qt object hierarchy.
         """
         super().__init__(parent)
 
         self.device_id: int = device_id
         self.capture_api: int = capture_api
+        self.camera_info: Optional[dict[str, any]] = camera_info
 
         self._capture: Optional[cv.VideoCapture] = None
         self._is_running: bool = False
