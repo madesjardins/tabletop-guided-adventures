@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import cv2 as cv
+import numpy as np
 from PySide6 import QtWidgets, QtCore, QtGui
 
 from .viewport_widget import ViewportWidget
@@ -58,6 +60,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.core.camera_manager.camera_added.connect(self._on_camera_added)
         self.core.camera_manager.camera_removed.connect(self._on_camera_removed)
 
+        # Set up viewport callbacks and start timer
+        self.viewport.set_get_frames_callback(
+            self._get_selected_camera_frames,
+            self._get_selected_camera_ids
+        )
+        self.viewport.start()
+
     def _setup_menu_bar(self) -> None:
         """Set up the menu bar."""
         menu_bar = self.menuBar()
@@ -89,6 +98,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Center-left: Camera tabs (Settings, Calibration, Snapshot)
         camera_tabs = self._create_camera_tabs()
+        camera_tabs.setFixedWidth(350)
         main_layout.addWidget(camera_tabs, 1, 0)
 
         # Center-right: Viewport
@@ -96,8 +106,8 @@ class MainWindow(QtWidgets.QMainWindow):
         main_layout.addWidget(viewport, 1, 1)
 
         # Set column stretches to give more space to the right side
-        main_layout.setColumnStretch(0, 1)
-        main_layout.setColumnStretch(1, 2)
+        main_layout.setColumnStretch(0, 0)
+        main_layout.setColumnStretch(1, 1)
 
         # Set row stretches to give more space to the bottom
         main_layout.setRowStretch(0, 1)
@@ -110,6 +120,7 @@ class MainWindow(QtWidgets.QMainWindow):
             Group box containing camera list and control buttons.
         """
         group = QtWidgets.QGroupBox("Cameras")
+        group.setFixedWidth(350)
         layout = QtWidgets.QVBoxLayout(group)
 
         # Camera list
@@ -171,7 +182,18 @@ class MainWindow(QtWidgets.QMainWindow):
         # Advanced tab
         advanced_widget = QtWidgets.QWidget()
         advanced_layout = QtWidgets.QVBoxLayout(advanced_widget)
-        advanced_layout.addWidget(QtWidgets.QLabel("Advanced settings will be added here"))
+
+        # Viewport refresh rate
+        refresh_form = QtWidgets.QFormLayout()
+        self.viewport_fps_spinbox = QtWidgets.QSpinBox()
+        self.viewport_fps_spinbox.setRange(5, 60)
+        self.viewport_fps_spinbox.setValue(30)
+        self.viewport_fps_spinbox.setSuffix(" fps")
+        self.viewport_fps_spinbox.valueChanged.connect(self._on_viewport_fps_changed)
+        refresh_form.addRow("Viewport Refresh Rate:", self.viewport_fps_spinbox)
+        advanced_layout.addLayout(refresh_form)
+
+        advanced_layout.addStretch()
         tabs.addTab(advanced_widget, "Advanced")
 
         # Debug tab
@@ -191,9 +213,7 @@ class MainWindow(QtWidgets.QMainWindow):
         tabs = QtWidgets.QTabWidget()
 
         # Settings tab
-        settings_widget = QtWidgets.QWidget()
-        settings_layout = QtWidgets.QVBoxLayout(settings_widget)
-        settings_layout.addWidget(QtWidgets.QLabel("Camera settings will be added here"))
+        settings_widget = self._create_camera_settings_widget()
         tabs.addTab(settings_widget, "Settings")
 
         # Calibration tab
@@ -210,6 +230,202 @@ class MainWindow(QtWidgets.QMainWindow):
 
         return tabs
 
+    def _create_camera_settings_widget(self) -> QtWidgets.QWidget:
+        """Create the camera settings widget.
+
+        Returns:
+            Widget containing camera property controls.
+        """
+        widget = QtWidgets.QWidget()
+        main_layout = QtWidgets.QVBoxLayout(widget)
+
+        # Use grid layout for all properties
+        grid = QtWidgets.QGridLayout()
+        grid.setColumnStretch(1, 1)
+
+        row = 0
+
+        # Device ID (read-only)
+        grid.addWidget(QtWidgets.QLabel("Device ID:"), row, 0)
+        self.device_id_edit = QtWidgets.QLineEdit()
+        self.device_id_edit.setReadOnly(True)
+        self.device_id_edit.setPlaceholderText("No camera selected")
+        grid.addWidget(self.device_id_edit, row, 1)
+        row += 1
+
+        # FourCC
+        grid.addWidget(QtWidgets.QLabel("FourCC:"), row, 0)
+        self.fourcc_combo = QtWidgets.QComboBox()
+        self.fourcc_combo.addItems(["YUY2", "MJPG"])
+        self.fourcc_combo.setCurrentText("YUY2")
+        self.fourcc_combo.currentTextChanged.connect(self._on_fourcc_changed)
+        grid.addWidget(self.fourcc_combo, row, 1)
+        row += 1
+
+        # Capture Resolution
+        grid.addWidget(QtWidgets.QLabel("Resolution:"), row, 0)
+        self.resolution_combo = QtWidgets.QComboBox()
+        self.resolution_combo.addItems([
+            "640x480", "960x540", "1280x720", "1920x1080",
+            "2304x1536", "2560x1440", "3840x2160", "4096x2160"
+        ])
+        self.resolution_combo.setCurrentText("1920x1080")
+        self.resolution_combo.currentTextChanged.connect(self._on_resolution_changed)
+        grid.addWidget(self.resolution_combo, row, 1)
+        row += 1
+
+        # Exposure
+        grid.addWidget(QtWidgets.QLabel("Exposure:"), row, 0)
+        self.exposure_spinbox = QtWidgets.QSpinBox()
+        self.exposure_spinbox.setRange(-10, 10)
+        self.exposure_spinbox.setValue(5)
+        self.exposure_spinbox.valueChanged.connect(self._on_exposure_changed)
+        grid.addWidget(self.exposure_spinbox, row, 1)
+        row += 1
+
+        main_layout.addLayout(grid)
+
+        # Add separator
+        separator = QtWidgets.QFrame()
+        separator.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        separator.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        main_layout.addWidget(separator)
+
+        # Slider properties grid
+        slider_grid = QtWidgets.QGridLayout()
+        slider_grid.setColumnStretch(1, 1)
+
+        slider_row = 0
+
+        # Focus
+        self.focus_slider, self.focus_reset = self._create_slider_with_reset(
+            "Focus", 0, 255, 0, self._on_focus_changed, self._on_focus_reset
+        )
+        self._add_slider_to_grid(slider_grid, slider_row, "Focus:", self.focus_slider, self.focus_reset)
+        slider_row += 1
+
+        # Zoom
+        self.zoom_slider, self.zoom_reset = self._create_slider_with_reset(
+            "Zoom", 100, 500, 100, self._on_zoom_changed, self._on_zoom_reset
+        )
+        self._add_slider_to_grid(slider_grid, slider_row, "Zoom:", self.zoom_slider, self.zoom_reset)
+        slider_row += 1
+
+        # Brightness
+        self.brightness_slider, self.brightness_reset = self._create_slider_with_reset(
+            "Brightness", 0, 255, 128, self._on_brightness_changed, self._on_brightness_reset
+        )
+        self._add_slider_to_grid(slider_grid, slider_row, "Brightness:", self.brightness_slider, self.brightness_reset)
+        slider_row += 1
+
+        # Contrast
+        self.contrast_slider, self.contrast_reset = self._create_slider_with_reset(
+            "Contrast", 0, 255, 128, self._on_contrast_changed, self._on_contrast_reset
+        )
+        self._add_slider_to_grid(slider_grid, slider_row, "Contrast:", self.contrast_slider, self.contrast_reset)
+        slider_row += 1
+
+        # Gain
+        self.gain_slider, self.gain_reset = self._create_slider_with_reset(
+            "Gain", 0, 255, 128, self._on_gain_changed, self._on_gain_reset
+        )
+        self._add_slider_to_grid(slider_grid, slider_row, "Gain:", self.gain_slider, self.gain_reset)
+        slider_row += 1
+
+        # Saturation
+        self.saturation_slider, self.saturation_reset = self._create_slider_with_reset(
+            "Saturation", 0, 255, 128, self._on_saturation_changed, self._on_saturation_reset
+        )
+        self._add_slider_to_grid(slider_grid, slider_row, "Saturation:", self.saturation_slider, self.saturation_reset)
+        slider_row += 1
+
+        # Sharpness
+        self.sharpness_slider, self.sharpness_reset = self._create_slider_with_reset(
+            "Sharpness", 0, 255, 128, self._on_sharpness_changed, self._on_sharpness_reset
+        )
+        self._add_slider_to_grid(slider_grid, slider_row, "Sharpness:", self.sharpness_slider, self.sharpness_reset)
+        slider_row += 1
+
+        main_layout.addLayout(slider_grid)
+        main_layout.addStretch()
+
+        # Initially disable all controls
+        self._set_camera_settings_enabled(False)
+
+        return widget
+
+    def _add_slider_to_grid(self, grid: QtWidgets.QGridLayout, row: int, label_text: str,
+                            slider: QtWidgets.QSlider, reset_button: QtWidgets.QPushButton) -> None:
+        """Add a slider row to the grid layout.
+
+
+        Args:
+            grid: Grid layout to add to.
+            row: Row number.
+            label_text: Label text.
+            slider: Slider widget.
+            reset_button: Reset button widget.
+        """
+        # Label
+        label = QtWidgets.QLabel(label_text)
+        grid.addWidget(label, row, 0)
+
+        # Slider
+        grid.addWidget(slider, row, 1)
+
+        # Value label
+        value_label = QtWidgets.QLabel(str(slider.value()))
+        value_label.setMinimumWidth(40)
+        value_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        slider.valueChanged.connect(lambda v: value_label.setText(str(v)))
+        grid.addWidget(value_label, row, 2)
+
+        # Vertical separator
+        separator = QtWidgets.QFrame()
+        separator.setFrameShape(QtWidgets.QFrame.Shape.VLine)
+        separator.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        separator.setStyleSheet("color: white;")
+        grid.addWidget(separator, row, 3)
+
+        # Reset button
+        grid.addWidget(reset_button, row, 4)
+
+    def _create_slider_with_reset(
+        self,
+        name: str,
+        min_val: int,
+        max_val: int,
+        default_val: int,
+        value_changed_callback,
+        reset_callback
+    ) -> tuple[QtWidgets.QSlider, QtWidgets.QPushButton]:
+        """Create a slider with associated reset button.
+
+        Args:
+            name: Property name.
+            min_val: Minimum value.
+            max_val: Maximum value.
+            default_val: Default value.
+            value_changed_callback: Callback for value changes.
+            reset_callback: Callback for reset button.
+
+        Returns:
+            Tuple of (slider, reset_button).
+        """
+        slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        slider.setRange(min_val, max_val)
+        slider.setValue(default_val)
+        slider.setSingleStep(1)
+        slider.setPageStep(10)
+        slider.setProperty("default_value", default_val)
+        slider.valueChanged.connect(value_changed_callback)
+
+        reset_button = QtWidgets.QPushButton("Reset")
+        reset_button.setMaximumWidth(60)
+        reset_button.clicked.connect(reset_callback)
+
+        return slider, reset_button
+
     def _create_viewport(self) -> ViewportWidget:
         """Create the viewport widget.
 
@@ -218,6 +434,37 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         self.viewport = ViewportWidget()
         return self.viewport
+
+    def _get_selected_camera_frames(self) -> list[np.ndarray]:
+        """Get frames from selected cameras.
+
+        Returns:
+            List of frames from selected cameras.
+        """
+        frames = []
+        selected_items = self.camera_list.selectedItems()
+
+        for item in selected_items:
+            camera_name = item.text()
+            try:
+                camera = self.core.camera_manager.get_camera(camera_name)
+                frame = camera.get_frame()
+                if frame is not None:
+                    frames.append(frame)
+            except KeyError:
+                # Camera was removed
+                pass
+
+        return frames
+
+    def _get_selected_camera_ids(self) -> list[int]:
+        """Get IDs (hashes) of selected cameras for tracking selection changes.
+
+        Returns:
+            List of camera name hashes.
+        """
+        selected_items = self.camera_list.selectedItems()
+        return [hash(item.text()) for item in selected_items]
 
     @QtCore.Slot()
     def _on_add_camera(self) -> None:
@@ -297,9 +544,31 @@ class MainWindow(QtWidgets.QMainWindow):
     @QtCore.Slot()
     def _on_camera_selection_changed(self) -> None:
         """Handle camera list selection change."""
+        selected_items = self.camera_list.selectedItems()
+        has_selection = len(selected_items) > 0
+
         # Enable delete button only if at least one camera is selected
-        has_selection = len(self.camera_list.selectedItems()) > 0
         self.delete_camera_button.setEnabled(has_selection)
+
+        # Update camera settings based on selection
+        if len(selected_items) == 1:
+            # Single camera selected - enable and load settings
+            self._set_camera_settings_enabled(True)
+            self._load_camera_settings(selected_items[0].text())
+        else:
+            # Multiple or no cameras selected - disable settings
+            self._set_camera_settings_enabled(False)
+            self.device_id_edit.clear()
+            self.device_id_edit.setPlaceholderText("No camera selected" if len(selected_items) == 0 else "Multiple cameras selected")
+
+    @QtCore.Slot(int)
+    def _on_viewport_fps_changed(self, fps: int) -> None:
+        """Handle viewport FPS change.
+
+        Args:
+            fps: New frames per second value.
+        """
+        self.viewport.set_fps(fps)
 
     @QtCore.Slot()
     def _on_load_camera(self) -> None:
@@ -345,8 +614,225 @@ class MainWindow(QtWidgets.QMainWindow):
         Args:
             event: Close event.
         """
+        # Stop viewport updates
+        self.viewport.stop()
+
         # Release all camera resources
         self.core.release_all()
 
         # Accept the close event
         event.accept()
+
+    def _set_camera_settings_enabled(self, enabled: bool) -> None:
+        """Enable or disable camera settings controls.
+
+        Args:
+            enabled: True to enable, False to disable.
+        """
+        self.fourcc_combo.setEnabled(enabled)
+        self.resolution_combo.setEnabled(enabled)
+        self.exposure_spinbox.setEnabled(enabled)
+        self.focus_slider.setEnabled(enabled)
+        self.focus_reset.setEnabled(enabled)
+        self.zoom_slider.setEnabled(enabled)
+        self.zoom_reset.setEnabled(enabled)
+        self.brightness_slider.setEnabled(enabled)
+        self.brightness_reset.setEnabled(enabled)
+        self.contrast_slider.setEnabled(enabled)
+        self.contrast_reset.setEnabled(enabled)
+        self.gain_slider.setEnabled(enabled)
+        self.gain_reset.setEnabled(enabled)
+        self.saturation_slider.setEnabled(enabled)
+        self.saturation_reset.setEnabled(enabled)
+        self.sharpness_slider.setEnabled(enabled)
+        self.sharpness_reset.setEnabled(enabled)
+
+    def _load_camera_settings(self, camera_name: str) -> None:
+        """Load settings from a camera into the UI.
+
+        Args:
+            camera_name: Name of the camera to load settings from.
+        """
+        try:
+            camera = self.core.camera_manager.get_camera(camera_name)
+
+            # Block signals while updating to avoid triggering camera updates
+            self.fourcc_combo.blockSignals(True)
+            self.resolution_combo.blockSignals(True)
+            self.exposure_spinbox.blockSignals(True)
+            self.focus_slider.blockSignals(True)
+            self.zoom_slider.blockSignals(True)
+            self.brightness_slider.blockSignals(True)
+            self.contrast_slider.blockSignals(True)
+            self.gain_slider.blockSignals(True)
+            self.saturation_slider.blockSignals(True)
+            self.sharpness_slider.blockSignals(True)
+
+            # Device ID
+            self.device_id_edit.setText(str(camera.get_device_id()))
+
+            # FourCC
+            fourcc_int = int(camera.get_property(cv.CAP_PROP_FOURCC))
+            fourcc_str = "".join([chr((fourcc_int >> 8 * i) & 0xFF) for i in range(4)])
+            if fourcc_str in ["YUY2", "MJPG"]:
+                self.fourcc_combo.setCurrentText(fourcc_str)
+
+            # Resolution
+            width = int(camera.get_property(cv.CAP_PROP_FRAME_WIDTH))
+            height = int(camera.get_property(cv.CAP_PROP_FRAME_HEIGHT))
+            resolution_str = f"{width}x{height}"
+            idx = self.resolution_combo.findText(resolution_str)
+            if idx >= 0:
+                self.resolution_combo.setCurrentIndex(idx)
+
+            # Exposure
+            exposure = int(camera.get_property(cv.CAP_PROP_EXPOSURE))
+            self.exposure_spinbox.setValue(exposure)
+
+            # Slider properties
+            self.focus_slider.setValue(int(camera.get_property(cv.CAP_PROP_FOCUS)))
+            self.zoom_slider.setValue(int(camera.get_property(cv.CAP_PROP_ZOOM)))
+            self.brightness_slider.setValue(int(camera.get_property(cv.CAP_PROP_BRIGHTNESS)))
+            self.contrast_slider.setValue(int(camera.get_property(cv.CAP_PROP_CONTRAST)))
+            self.gain_slider.setValue(int(camera.get_property(cv.CAP_PROP_GAIN)))
+            self.saturation_slider.setValue(int(camera.get_property(cv.CAP_PROP_SATURATION)))
+            self.sharpness_slider.setValue(int(camera.get_property(cv.CAP_PROP_SHARPNESS)))
+
+            # Unblock signals
+            self.fourcc_combo.blockSignals(False)
+            self.resolution_combo.blockSignals(False)
+            self.exposure_spinbox.blockSignals(False)
+            self.focus_slider.blockSignals(False)
+            self.zoom_slider.blockSignals(False)
+            self.brightness_slider.blockSignals(False)
+            self.contrast_slider.blockSignals(False)
+            self.gain_slider.blockSignals(False)
+            self.saturation_slider.blockSignals(False)
+            self.sharpness_slider.blockSignals(False)
+
+        except KeyError:
+            # Camera not found
+            pass
+
+    def _get_selected_camera(self):
+        """Get the currently selected camera if exactly one is selected.
+
+        Returns:
+            Camera object or None.
+        """
+        selected_items = self.camera_list.selectedItems()
+        if len(selected_items) == 1:
+            try:
+                return self.core.camera_manager.get_camera(selected_items[0].text())
+            except KeyError:
+                pass
+        return None
+
+    # Property change handlers
+    @QtCore.Slot(str)
+    def _on_fourcc_changed(self, fourcc: str) -> None:
+        """Handle FourCC change."""
+        camera = self._get_selected_camera()
+        if camera:
+            fourcc_int = sum([ord(c) << (8 * i) for i, c in enumerate(fourcc[:4])])
+            camera.set_property(cv.CAP_PROP_FOURCC, float(fourcc_int))
+
+    @QtCore.Slot(str)
+    def _on_resolution_changed(self, resolution: str) -> None:
+        """Handle resolution change."""
+        camera = self._get_selected_camera()
+        if camera:
+            width, height = map(int, resolution.split('x'))
+            camera.set_property(cv.CAP_PROP_FRAME_WIDTH, float(width))
+            camera.set_property(cv.CAP_PROP_FRAME_HEIGHT, float(height))
+
+    @QtCore.Slot(int)
+    def _on_exposure_changed(self, value: int) -> None:
+        """Handle exposure change."""
+        camera = self._get_selected_camera()
+        if camera:
+            camera.set_property(cv.CAP_PROP_EXPOSURE, float(value))
+
+    @QtCore.Slot(int)
+    def _on_focus_changed(self, value: int) -> None:
+        """Handle focus change."""
+        camera = self._get_selected_camera()
+        if camera:
+            camera.set_property(cv.CAP_PROP_FOCUS, float(value))
+
+    @QtCore.Slot()
+    def _on_focus_reset(self) -> None:
+        """Reset focus to default."""
+        self.focus_slider.setValue(self.focus_slider.property("default_value"))
+
+    @QtCore.Slot(int)
+    def _on_zoom_changed(self, value: int) -> None:
+        """Handle zoom change."""
+        camera = self._get_selected_camera()
+        if camera:
+            camera.set_property(cv.CAP_PROP_ZOOM, float(value))
+
+    @QtCore.Slot()
+    def _on_zoom_reset(self) -> None:
+        """Reset zoom to default."""
+        self.zoom_slider.setValue(self.zoom_slider.property("default_value"))
+
+    @QtCore.Slot(int)
+    def _on_brightness_changed(self, value: int) -> None:
+        """Handle brightness change."""
+        camera = self._get_selected_camera()
+        if camera:
+            camera.set_property(cv.CAP_PROP_BRIGHTNESS, float(value))
+
+    @QtCore.Slot()
+    def _on_brightness_reset(self) -> None:
+        """Reset brightness to default."""
+        self.brightness_slider.setValue(self.brightness_slider.property("default_value"))
+
+    @QtCore.Slot(int)
+    def _on_contrast_changed(self, value: int) -> None:
+        """Handle contrast change."""
+        camera = self._get_selected_camera()
+        if camera:
+            camera.set_property(cv.CAP_PROP_CONTRAST, float(value))
+
+    @QtCore.Slot()
+    def _on_contrast_reset(self) -> None:
+        """Reset contrast to default."""
+        self.contrast_slider.setValue(self.contrast_slider.property("default_value"))
+
+    @QtCore.Slot(int)
+    def _on_gain_changed(self, value: int) -> None:
+        """Handle gain change."""
+        camera = self._get_selected_camera()
+        if camera:
+            camera.set_property(cv.CAP_PROP_GAIN, float(value))
+
+    @QtCore.Slot()
+    def _on_gain_reset(self) -> None:
+        """Reset gain to default."""
+        self.gain_slider.setValue(self.gain_slider.property("default_value"))
+
+    @QtCore.Slot(int)
+    def _on_saturation_changed(self, value: int) -> None:
+        """Handle saturation change."""
+        camera = self._get_selected_camera()
+        if camera:
+            camera.set_property(cv.CAP_PROP_SATURATION, float(value))
+
+    @QtCore.Slot()
+    def _on_saturation_reset(self) -> None:
+        """Reset saturation to default."""
+        self.saturation_slider.setValue(self.saturation_slider.property("default_value"))
+
+    @QtCore.Slot(int)
+    def _on_sharpness_changed(self, value: int) -> None:
+        """Handle sharpness change."""
+        camera = self._get_selected_camera()
+        if camera:
+            camera.set_property(cv.CAP_PROP_SHARPNESS, float(value))
+
+    @QtCore.Slot()
+    def _on_sharpness_reset(self) -> None:
+        """Reset sharpness to default."""
+        self.sharpness_slider.setValue(self.sharpness_slider.property("default_value"))

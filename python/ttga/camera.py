@@ -116,7 +116,8 @@ class Camera(QtCore.QObject):
         Returns:
             Property value.
         """
-        return self.camera_feed.get_property(prop_id)
+        result = self.camera_feed.get_capture_property(prop_id)
+        return result if result is not None else 0.0
 
     def set_property(self, prop_id: int, value: float) -> bool:
         """Set a camera property value.
@@ -128,7 +129,7 @@ class Camera(QtCore.QObject):
         Returns:
             True if property was set successfully.
         """
-        return self.camera_feed.set_property(prop_id, value)
+        return self.camera_feed.update_capture_property(prop_id, value)
 
     def get_backend(self) -> int:
         """Get the camera backend API.
