@@ -21,6 +21,7 @@ core functionality and state.
 from __future__ import annotations
 
 from .camera_manager import CameraManager
+from .camera_calibration import CameraCalibration
 
 
 class MainCore:
@@ -31,11 +32,13 @@ class MainCore:
 
     Attributes:
         camera_manager: Manager for all active cameras.
+        camera_calibration: Camera calibration manager.
     """
 
     def __init__(self) -> None:
         """Initialize the main core."""
         self.camera_manager = CameraManager()
+        self.camera_calibration = CameraCalibration()
 
     def release_all(self) -> None:
         """Release all resources."""

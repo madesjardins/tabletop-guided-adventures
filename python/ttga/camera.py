@@ -20,10 +20,15 @@ frame buffering, calibration data, and camera control.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 from PySide6 import QtCore
 
 from .camera_feed import CameraFeed
+
+if TYPE_CHECKING:
+    from .camera_calibration import CameraCalibrationData
 
 
 class Camera(QtCore.QObject):
@@ -58,7 +63,7 @@ class Camera(QtCore.QObject):
         super().__init__(parent)
 
         self.name = name
-        self.calibration_data = None
+        self.calibration_data: CameraCalibrationData | None = None
         self._backend = backend
         self._device_id = device_id
 
@@ -96,6 +101,25 @@ class Camera(QtCore.QObject):
             Current frame or None if no frame available.
         """
         return self._frame_buffer[self._current_index]
+
+    def get_undistorted_frame(self) -> np.ndarray | None:
+        """Get the current undistorted frame.
+
+        If the camera is calibrated with undistortion rectification,
+        returns the undistorted frame. Otherwise, returns the raw frame.
+
+        Returns:
+            Undistorted frame if calibrated, raw frame otherwise, or None if no frame available.
+        """
+        frame = self.get_frame()
+        if frame is None:
+            return None
+
+        # If calibrated, apply undistortion rectification
+        if self.calibration_data is not None:
+            return self.calibration_data.undistort_rectification.undistort_frame(frame)
+
+        return frame
 
     def start(self) -> None:
         """Start the camera feed."""
@@ -186,10 +210,23 @@ class Camera(QtCore.QObject):
             # Store property IDs as strings and values as integers to avoid JSON serialization issues
             properties[str(prop_id)] = int(value)
 
+        # Serialize calibration data if present
+        calibration_dict = None
+        if self.calibration_data is not None:
+            calibration_dict = {
+                'mtx': self.calibration_data.mtx.tolist(),
+                'dist': self.calibration_data.dist.tolist(),
+                'rvecs_list': [rvec.tolist() for rvec in self.calibration_data.rvecs_list],
+                'tvecs_list': [tvec.tolist() for tvec in self.calibration_data.tvecs_list],
+                'mean_reprojection_error': self.calibration_data.mean_reprojection_error,
+                'resolution': self.calibration_data.resolution
+            }
+
         return {
             'name': self.name,
             'backend': self._backend,
             'device_id': self._device_id,
             'camera_info': self.camera_feed.camera_info,
-            'properties': properties
+            'properties': properties,
+            'calibration_data': calibration_dict
         }
