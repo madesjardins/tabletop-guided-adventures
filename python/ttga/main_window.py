@@ -100,7 +100,7 @@ class MainWindow(QtWidgets.QMainWindow):
         settings_tabs = self._create_settings_tabs()
         main_layout.addWidget(settings_tabs, 0, 1)
 
-        # Center-left: Camera tabs (Settings, Calibration, Snapshot)
+        # Center-left: Camera tabs (Settings, Calibration, Snapshots)
         camera_tabs = self._create_camera_tabs()
         camera_tabs.setFixedWidth(350)
         main_layout.addWidget(camera_tabs, 1, 0)
@@ -224,11 +224,9 @@ class MainWindow(QtWidgets.QMainWindow):
         calibration_widget = self._create_camera_calibration_widget()
         tabs.addTab(calibration_widget, "Calibration")
 
-        # Snapshot tab
-        snapshot_widget = QtWidgets.QWidget()
-        snapshot_layout = QtWidgets.QVBoxLayout(snapshot_widget)
-        snapshot_layout.addWidget(QtWidgets.QLabel("Camera snapshot will be added here"))
-        tabs.addTab(snapshot_widget, "Snapshot")
+        # Snapshots tab
+        snapshots_widget = self._create_snapshots_widget()
+        tabs.addTab(snapshots_widget, "Snapshots")
 
         return tabs
 
@@ -466,6 +464,58 @@ class MainWindow(QtWidgets.QMainWindow):
 
         return widget
 
+    def _create_snapshots_widget(self) -> QtWidgets.QWidget:
+        """Create the snapshots widget.
+
+        Returns:
+            Widget containing snapshots controls.
+        """
+        widget = QtWidgets.QWidget()
+        main_layout = QtWidgets.QVBoxLayout(widget)
+
+        # Folder and file name settings
+        naming_group = QtWidgets.QGroupBox("Snapshots Naming")
+        naming_layout = QtWidgets.QFormLayout(naming_group)
+
+        # Custom folder name
+        self.snapshots_folder_edit = QtWidgets.QLineEdit()
+        self.snapshots_folder_edit.setPlaceholderText("Leave empty for date (YYYY-MM-DD)")
+        naming_layout.addRow("Custom folder name:", self.snapshots_folder_edit)
+
+        # Custom file name
+        self.snapshots_file_edit = QtWidgets.QLineEdit()
+        self.snapshots_file_edit.setPlaceholderText("Leave empty for timestamp (YYYY-MM-DD_HH-mm-SS)")
+        naming_layout.addRow("Custom file name:", self.snapshots_file_edit)
+
+        main_layout.addWidget(naming_group)
+
+        # Options
+        options_group = QtWidgets.QGroupBox("Snapshots Options")
+        options_layout = QtWidgets.QVBoxLayout(options_group)
+
+        # Add camera name checkbox
+        self.snapshots_add_camera_checkbox = QtWidgets.QCheckBox("Add camera to file name")
+        self.snapshots_add_camera_checkbox.setChecked(True)
+        options_layout.addWidget(self.snapshots_add_camera_checkbox)
+
+        # Add timestamp checkbox
+        self.snapshots_add_timestamp_checkbox = QtWidgets.QCheckBox("Add timestamp to file name")
+        self.snapshots_add_timestamp_checkbox.setChecked(True)
+        options_layout.addWidget(self.snapshots_add_timestamp_checkbox)
+
+        main_layout.addWidget(options_group)
+
+        # Take snapshots button
+        self.take_snapshots_button = QtWidgets.QPushButton("Take Snapshot(s)")
+        self.take_snapshots_button.setMinimumHeight(40)
+        self.take_snapshots_button.clicked.connect(self._on_take_snapshots)
+        self.take_snapshots_button.setEnabled(False)
+        main_layout.addWidget(self.take_snapshots_button)
+
+        main_layout.addStretch()
+
+        return widget
+
     def _add_slider_to_grid(self, grid: QtWidgets.QGridLayout, row: int, label_text: str,
                             slider: QtWidgets.QSlider, reset_button: QtWidgets.QPushButton) -> QtWidgets.QLabel:
         """Add a slider row to the grid layout.
@@ -660,6 +710,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Enable delete button only if at least one camera is selected
         self.delete_camera_button.setEnabled(has_selection)
+
+        # Enable snapshots button only if at least one camera is selected
+        self.take_snapshots_button.setEnabled(has_selection)
 
         # Update camera settings based on selection
         if len(selected_items) == 1:
@@ -1480,3 +1533,94 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_camera_settings_enabled(True, is_calibrated=False)
         self._set_calibration_enabled(True)
         self._update_calibration_buttons()
+
+    @QtCore.Slot()
+    def _on_take_snapshots(self) -> None:
+        """Handle take snapshots button click."""
+        from datetime import datetime
+        import cv2 as cv
+        from . import constants
+
+        # Get selected cameras
+        selected_items = self.camera_list.selectedItems()
+        if not selected_items:
+            return
+
+        # Get current timestamp
+        now = datetime.now()
+        date_str = now.strftime("%Y-%m-%d")
+        timestamp_str = now.strftime("%Y-%m-%d_%H-%M-%S")
+
+        # Determine folder name
+        folder_name = self.snapshots_folder_edit.text().strip()
+        if not folder_name:
+            folder_name = date_str
+
+        # Determine base file name
+        custom_file_name = self.snapshots_file_edit.text().strip()
+        if not custom_file_name:
+            base_file_name = timestamp_str
+        else:
+            base_file_name = custom_file_name
+
+        # Process each selected camera
+        saved_count = 0
+        for item in selected_items:
+            camera_name = item.text()
+            try:
+                camera = self.core.camera_manager.get_camera(camera_name)
+                frame = camera.get_undistorted_frame()
+
+                if frame is None:
+                    QtWidgets.QMessageBox.warning(
+                        self,
+                        "No Frame Available",
+                        f"No frame available from camera '{camera_name}'. Skipping."
+                    )
+                    continue
+
+                # Build file name with suffixes
+                file_name = base_file_name
+
+                # Add camera name suffix if checked
+                if self.snapshots_add_camera_checkbox.isChecked():
+                    file_name += f"__{camera_name}"
+
+                # Add timestamp suffix if custom file name was provided and checkbox is checked
+                if custom_file_name and self.snapshots_add_timestamp_checkbox.isChecked():
+                    file_name += f"__{timestamp_str}"
+
+                # Build full file path
+                file_path = constants.SAVED_SNAPSHOT_FILE_PATH_TEMPLATE.format(
+                    folder_name=folder_name,
+                    file_name=file_name
+                )
+
+                # Ensure parent directory exists
+                import os
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+                # Save the frame as PNG
+                cv.imwrite(file_path, frame)
+                saved_count += 1
+
+            except KeyError:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Camera Not Found",
+                    f"Camera '{camera_name}' was removed. Skipping."
+                )
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Error Saving Snapshots",
+                    f"Failed to save snapshot for camera '{camera_name}': {str(e)}"
+                )
+
+        # Show success message
+        if saved_count > 0:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Snapshots Saved",
+                f"Successfully saved {saved_count} snapshot(s) to:\n{os.path.dirname(file_path)}"
+            )

@@ -20,3 +20,5 @@ ROOT_DIR_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 TEMP_DIR_PATH = os.path.join(ROOT_DIR_PATH, "temp")
 SAVED_ROOT_DIR_PATH = os.path.join(ROOT_DIR_PATH, "saved")
 SAVED_CAMERAS_DIR_PATH = os.path.join(SAVED_ROOT_DIR_PATH, "cameras")
+SAVED_SNAPSHOTS_DIR_PATH = os.path.join(SAVED_ROOT_DIR_PATH, "snapshots")
+SAVED_SNAPSHOT_FILE_PATH_TEMPLATE = os.path.join(SAVED_SNAPSHOTS_DIR_PATH, "{folder_name}", "{file_name}.png")
