@@ -44,19 +44,23 @@ class AddCameraDialog(QtWidgets.QDialog):
     def __init__(
         self,
         used_device_ids_by_backend: dict[int, set[int]],
+        existing_camera_names: set[str],
         parent: QtWidgets.QWidget | None = None
     ) -> None:
         """Initialize the add camera dialog.
 
         Args:
             used_device_ids_by_backend: Dictionary mapping backend to used device IDs.
+            existing_camera_names: Set of existing camera names to prevent duplicates.
             parent: Parent widget.
         """
         super().__init__(parent)
 
         self.used_device_ids_by_backend = used_device_ids_by_backend
+        self.existing_camera_names = existing_camera_names
         self.selected_backend: int | None = None
         self.selected_device_id: int | None = None
+        self.selected_camera_info: dict | None = None
         self.camera_name: str | None = None
 
         self.setWindowTitle("Add Camera")
@@ -157,7 +161,7 @@ class AddCameraDialog(QtWidgets.QDialog):
             for camera_info in available_cameras:
                 device_id = camera_info['index']
                 device_name = camera_info.get('name', f"Camera {device_id}")
-                self.device_combo.addItem(f"{device_id}: {device_name}", device_id)
+                self.device_combo.addItem(f"{device_id}: {device_name}", camera_info)
 
             self.continue_button.setEnabled(True)
 
@@ -182,20 +186,27 @@ class AddCameraDialog(QtWidgets.QDialog):
             self.status_label.setText("Please enter a camera name.")
             return
 
+        # Check for duplicate camera name
+        if camera_name in self.existing_camera_names:
+            self.status_label.setText(f"Camera name '{camera_name}' already exists. Please choose a different name.")
+            return
+
         # Store selections
         self.selected_backend = self.backend_combo.currentData()
-        self.selected_device_id = self.device_combo.currentData()
+        camera_info = self.device_combo.currentData()
+        self.selected_device_id = camera_info['index'] if camera_info else None
+        self.selected_camera_info = camera_info
         self.camera_name = camera_name
 
         # Accept dialog
         self.accept()
 
-    def get_camera_info(self) -> tuple[str, int, int] | None:
+    def get_camera_info(self) -> tuple[str, int, int, dict | None] | None:
         """Get the selected camera information.
 
         Returns:
-            Tuple of (name, backend, device_id) or None if dialog was cancelled.
+            Tuple of (name, backend, device_id, camera_info) or None if dialog was cancelled.
         """
         if self.result() == QtWidgets.QDialog.DialogCode.Accepted:
-            return (self.camera_name, self.selected_backend, self.selected_device_id)
+            return (self.camera_name, self.selected_backend, self.selected_device_id, self.selected_camera_info)
         return None

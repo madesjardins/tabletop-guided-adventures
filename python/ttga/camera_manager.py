@@ -82,30 +82,26 @@ class CameraManager(QtCore.QObject):
 
         self._cameras: dict[str, Camera] = {}
 
-    def add_camera(self, name: str, backend: int, device_id: int) -> Camera:
+    def add_camera(self, name: str, backend: int, device_id: int, camera_info: dict[str, any] | None = None) -> Camera:
         """Add a new camera.
 
         Args:
-            name: Camera name (must be unique).
+            name: Camera name identifier.
             backend: OpenCV capture API backend.
             device_id: Camera device ID.
+            camera_info: Optional camera info dict with 'index', 'name', 'path' keys.
 
         Returns:
-            Created Camera instance.
+            The created Camera instance.
 
         Raises:
-            ValueError: If camera name already exists.
+            ValueError: If a camera with the given name already exists.
         """
         if name in self._cameras:
-            raise ValueError(f"Camera with name '{name}' already exists")
+            raise ValueError(f"Camera '{name}' already exists")
 
-        # Create camera
-        camera = Camera(name, backend, device_id, parent=self)
-
-        # Store camera
+        camera = Camera(name, backend, device_id, camera_info, parent=self)
         self._cameras[name] = camera
-
-        # Emit signal
         self.camera_added.emit(name)
 
         return camera
@@ -169,19 +165,74 @@ class CameraManager(QtCore.QObject):
         return name in self._cameras
 
     def get_used_device_ids(self, backend: int) -> set[int]:
-        """Get device IDs currently in use for a given backend.
+        """Get set of device IDs currently in use for a given backend.
 
         Args:
             backend: OpenCV capture API backend.
 
         Returns:
-            Set of device IDs in use for this backend.
+            Set of device IDs in use.
         """
         used_ids = set()
         for camera in self._cameras.values():
             if camera.get_backend() == backend:
                 used_ids.add(camera.get_device_id())
         return used_ids
+
+    def serialize_cameras(self) -> list[dict]:
+        """Serialize all cameras to a list of dictionaries.
+
+        Returns:
+            List of camera data dictionaries.
+        """
+        return [camera.to_dict() for camera in self._cameras.values()]
+
+    def find_matching_device(self, backend: int, saved_camera_info: dict | None, saved_device_id: int) -> int | None:
+        """Find matching device ID based on camera info and saved device ID.
+
+        Args:
+            backend: OpenCV capture API backend.
+            saved_camera_info: Saved camera info dict with 'name' key.
+            saved_device_id: Saved device ID.
+
+        Returns:
+            Matched device ID or None if no match found.
+        """
+        # Get all available cameras for this backend
+        all_cameras = enumerate_cameras(backend)
+
+        if not saved_camera_info or 'name' not in saved_camera_info:
+            # No camera info, try to use saved device_id if available
+            for cam in all_cameras:
+                if cam.index == saved_device_id:
+                    return saved_device_id
+            return None
+
+        saved_name = saved_camera_info['name']
+        matches = []
+
+        # Find all cameras with matching name
+        for cam in all_cameras:
+            if cam.name == saved_name:
+                matches.append(cam.index)
+
+        if not matches:
+            # No name match, try saved device_id
+            for cam in all_cameras:
+                if cam.index == saved_device_id:
+                    return saved_device_id
+            return None
+
+        if len(matches) == 1:
+            # Single match, use it
+            return matches[0]
+
+        # Multiple matches, prefer the one with matching device_id
+        if saved_device_id in matches:
+            return saved_device_id
+
+        # Otherwise use first match
+        return matches[0]
 
     def release_all(self) -> None:
         """Release all cameras."""

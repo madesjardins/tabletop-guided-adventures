@@ -20,12 +20,15 @@ application interface.
 
 from __future__ import annotations
 
+import json
+import os
 from typing import TYPE_CHECKING
 
 import cv2 as cv
 import numpy as np
 from PySide6 import QtWidgets, QtCore, QtGui
 
+from .constants import SAVED_CAMERAS_DIR_PATH
 from .viewport_widget import ViewportWidget
 from .add_camera_dialog import AddCameraDialog, BACKEND_MAP
 
@@ -301,49 +304,49 @@ class MainWindow(QtWidgets.QMainWindow):
         self.focus_slider, self.focus_reset = self._create_slider_with_reset(
             "Focus", 0, 255, 0, self._on_focus_changed, self._on_focus_reset
         )
-        self._add_slider_to_grid(slider_grid, slider_row, "Focus:", self.focus_slider, self.focus_reset)
+        self.focus_value_label = self._add_slider_to_grid(slider_grid, slider_row, "Focus:", self.focus_slider, self.focus_reset)
         slider_row += 1
 
         # Zoom
         self.zoom_slider, self.zoom_reset = self._create_slider_with_reset(
             "Zoom", 100, 500, 100, self._on_zoom_changed, self._on_zoom_reset
         )
-        self._add_slider_to_grid(slider_grid, slider_row, "Zoom:", self.zoom_slider, self.zoom_reset)
+        self.zoom_value_label = self._add_slider_to_grid(slider_grid, slider_row, "Zoom:", self.zoom_slider, self.zoom_reset)
         slider_row += 1
 
         # Brightness
         self.brightness_slider, self.brightness_reset = self._create_slider_with_reset(
             "Brightness", 0, 255, 128, self._on_brightness_changed, self._on_brightness_reset
         )
-        self._add_slider_to_grid(slider_grid, slider_row, "Brightness:", self.brightness_slider, self.brightness_reset)
+        self.brightness_value_label = self._add_slider_to_grid(slider_grid, slider_row, "Brightness:", self.brightness_slider, self.brightness_reset)
         slider_row += 1
 
         # Contrast
         self.contrast_slider, self.contrast_reset = self._create_slider_with_reset(
             "Contrast", 0, 255, 128, self._on_contrast_changed, self._on_contrast_reset
         )
-        self._add_slider_to_grid(slider_grid, slider_row, "Contrast:", self.contrast_slider, self.contrast_reset)
+        self.contrast_value_label = self._add_slider_to_grid(slider_grid, slider_row, "Contrast:", self.contrast_slider, self.contrast_reset)
         slider_row += 1
 
         # Gain
         self.gain_slider, self.gain_reset = self._create_slider_with_reset(
             "Gain", 0, 255, 128, self._on_gain_changed, self._on_gain_reset
         )
-        self._add_slider_to_grid(slider_grid, slider_row, "Gain:", self.gain_slider, self.gain_reset)
+        self.gain_value_label = self._add_slider_to_grid(slider_grid, slider_row, "Gain:", self.gain_slider, self.gain_reset)
         slider_row += 1
 
         # Saturation
         self.saturation_slider, self.saturation_reset = self._create_slider_with_reset(
             "Saturation", 0, 255, 128, self._on_saturation_changed, self._on_saturation_reset
         )
-        self._add_slider_to_grid(slider_grid, slider_row, "Saturation:", self.saturation_slider, self.saturation_reset)
+        self.saturation_value_label = self._add_slider_to_grid(slider_grid, slider_row, "Saturation:", self.saturation_slider, self.saturation_reset)
         slider_row += 1
 
         # Sharpness
         self.sharpness_slider, self.sharpness_reset = self._create_slider_with_reset(
             "Sharpness", 0, 255, 128, self._on_sharpness_changed, self._on_sharpness_reset
         )
-        self._add_slider_to_grid(slider_grid, slider_row, "Sharpness:", self.sharpness_slider, self.sharpness_reset)
+        self.sharpness_value_label = self._add_slider_to_grid(slider_grid, slider_row, "Sharpness:", self.sharpness_slider, self.sharpness_reset)
         slider_row += 1
 
         main_layout.addLayout(slider_grid)
@@ -355,7 +358,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return widget
 
     def _add_slider_to_grid(self, grid: QtWidgets.QGridLayout, row: int, label_text: str,
-                            slider: QtWidgets.QSlider, reset_button: QtWidgets.QPushButton) -> None:
+                            slider: QtWidgets.QSlider, reset_button: QtWidgets.QPushButton) -> QtWidgets.QLabel:
         """Add a slider row to the grid layout.
 
 
@@ -365,6 +368,9 @@ class MainWindow(QtWidgets.QMainWindow):
             label_text: Label text.
             slider: Slider widget.
             reset_button: Reset button widget.
+
+        Returns:
+            The value label widget for manual updates.
         """
         # Label
         label = QtWidgets.QLabel(label_text)
@@ -389,6 +395,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Reset button
         grid.addWidget(reset_button, row, 4)
+
+        return value_label
 
     def _create_slider_with_reset(
         self,
@@ -474,25 +482,19 @@ class MainWindow(QtWidgets.QMainWindow):
         for backend_name, backend_id in BACKEND_MAP.items():
             used_device_ids_by_backend[backend_id] = self.core.camera_manager.get_used_device_ids(backend_id)
 
+        # Get existing camera names
+        existing_names = set(self.core.camera_manager.get_camera_names())
+
         # Open dialog
-        dialog = AddCameraDialog(used_device_ids_by_backend, self)
+        dialog = AddCameraDialog(used_device_ids_by_backend, existing_names, self)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             camera_info = dialog.get_camera_info()
             if camera_info:
-                name, backend, device_id = camera_info
-
-                # Check if name already exists
-                if self.core.camera_manager.has_camera(name):
-                    QtWidgets.QMessageBox.warning(
-                        self,
-                        "Camera Exists",
-                        f"A camera with the name '{name}' already exists."
-                    )
-                    return
+                name, backend, device_id, cam_info = camera_info
 
                 try:
                     # Add camera through camera manager
-                    camera = self.core.camera_manager.add_camera(name, backend, device_id)
+                    camera = self.core.camera_manager.add_camera(name, backend, device_id, cam_info)
 
                     # Start camera feed
                     camera.start()
@@ -571,14 +573,224 @@ class MainWindow(QtWidgets.QMainWindow):
         self.viewport.set_fps(fps)
 
     @QtCore.Slot()
-    def _on_load_camera(self) -> None:
-        """Handle load camera button click."""
-        pass
-
-    @QtCore.Slot()
     def _on_save_camera(self) -> None:
         """Handle save camera button click."""
-        pass
+        # Get all cameras data
+        cameras_data = self.core.camera_manager.serialize_cameras()
+
+        if not cameras_data:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No Cameras",
+                "There are no cameras to save."
+            )
+            return
+
+        # Ensure saved cameras directory exists
+        os.makedirs(SAVED_CAMERAS_DIR_PATH, exist_ok=True)
+
+        # Open file save dialog
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save Cameras",
+            SAVED_CAMERAS_DIR_PATH,
+            "JSON Files (*.json)"
+        )
+
+        if file_path:
+            try:
+                with open(file_path, 'w') as f:
+                    json.dump(cameras_data, f, indent=2)
+
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Cameras Saved",
+                    f"Successfully saved {len(cameras_data)} camera(s) to {file_path}"
+                )
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Error Saving Cameras",
+                    f"Failed to save cameras: {str(e)}"
+                )
+
+    @QtCore.Slot()
+    def _on_load_camera(self) -> None:
+        """Handle load camera button click."""
+        # Ensure saved cameras directory exists
+        os.makedirs(SAVED_CAMERAS_DIR_PATH, exist_ok=True)
+
+        # Open file open dialog
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Load Cameras",
+            SAVED_CAMERAS_DIR_PATH,
+            "JSON Files (*.json)"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            # Load JSON file
+            with open(file_path, 'r') as f:
+                cameras_data = json.load(f)
+
+            if not cameras_data:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "No Cameras",
+                    "The file contains no cameras to load."
+                )
+                return
+
+            # Process each camera and find matching devices
+            cameras_to_load = []
+            missing_cameras = []
+            used_device_ids = {}  # Track device IDs already assigned: {backend: set(device_ids)}
+
+            for cam_data in cameras_data:
+                backend = cam_data['backend']
+                saved_device_id = cam_data['device_id']
+                saved_camera_info = cam_data.get('camera_info')
+
+                # Find matching device
+                matched_device_id = self.core.camera_manager.find_matching_device(
+                    backend, saved_camera_info, saved_device_id
+                )
+
+                if matched_device_id is None:
+                    missing_cameras.append(cam_data['name'])
+                    continue
+
+                # Check if this device ID was already assigned to another camera in this load
+                if backend not in used_device_ids:
+                    used_device_ids[backend] = set()
+
+                if matched_device_id in used_device_ids[backend]:
+                    # Device already assigned to another camera in this load - skip as duplicate
+                    missing_cameras.append(cam_data['name'])
+                    continue
+
+                # Mark this device ID as used
+                used_device_ids[backend].add(matched_device_id)
+
+                cameras_to_load.append({
+                    'name': cam_data['name'],
+                    'backend': backend,
+                    'device_id': matched_device_id,
+                    'camera_info': saved_camera_info,
+                    'properties': cam_data.get('properties', {})
+                })
+
+            if not cameras_to_load:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "No Cameras to Load",
+                    "No matching devices found for any cameras in the file."
+                )
+                return
+
+            # Check for conflicts with existing cameras
+            conflicts = []
+            existing_cameras = self.core.camera_manager.get_camera_names()
+            for cam in cameras_to_load:
+                # Check name conflict
+                if cam['name'] in existing_cameras:
+                    conflicts.append(cam['name'])
+                    continue
+
+                # Check device conflict
+                for existing_name in existing_cameras:
+                    existing_cam = self.core.camera_manager.get_camera(existing_name)
+                    if (existing_cam.get_backend() == cam['backend'] and
+                        existing_cam.get_device_id() == cam['device_id']):
+                        conflicts.append(existing_name)
+
+            # Remove duplicates from conflicts
+            conflicts = list(set(conflicts))
+
+            # Show confirmation dialog if there are conflicts or missing cameras
+            if conflicts or missing_cameras:
+                message_parts = []
+
+                if conflicts:
+                    conflict_list = "\n".join(f"  - {name}" for name in conflicts)
+                    message_parts.append(f"The following cameras will be removed before loading:\n{conflict_list}")
+
+                if missing_cameras:
+                    missing_list = "\n".join(f"  - {name}" for name in missing_cameras)
+                    message_parts.append(f"The following cameras could not be found and will be skipped:\n{missing_list}")
+
+                message = "\n\n".join(message_parts) + "\n\nDo you want to continue?"
+
+                reply = QtWidgets.QMessageBox.question(
+                    self,
+                    "Load Cameras Confirmation",
+                    message,
+                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                    QtWidgets.QMessageBox.StandardButton.No
+                )
+
+                if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return
+
+                # Remove conflicting cameras
+                for conflict_name in conflicts:
+                    try:
+                        self.core.camera_manager.remove_camera(conflict_name)
+                    except Exception as e:
+                        QtWidgets.QMessageBox.warning(
+                            self,
+                            "Error Removing Camera",
+                            f"Failed to remove camera '{conflict_name}': {str(e)}"
+                        )
+
+            # Load cameras
+            loaded_count = 0
+            for cam in cameras_to_load:
+                try:
+                    # Add camera
+                    camera = self.core.camera_manager.add_camera(
+                        cam['name'],
+                        cam['backend'],
+                        cam['device_id'],
+                        cam['camera_info']
+                    )
+
+                    # Apply properties
+                    for prop_id, value in cam['properties'].items():
+                        prop_id_int = int(prop_id)
+                        # FOURCC, width, and height must be set as integers
+                        if prop_id_int in [cv.CAP_PROP_FOURCC, cv.CAP_PROP_FRAME_WIDTH, cv.CAP_PROP_FRAME_HEIGHT]:
+                            camera.set_property(prop_id_int, float(int(value)))
+                        else:
+                            camera.set_property(prop_id_int, float(value))
+
+                    # Start camera
+                    camera.start()
+                    loaded_count += 1
+
+                except Exception as e:
+                    QtWidgets.QMessageBox.warning(
+                        self,
+                        "Error Loading Camera",
+                        f"Failed to load camera '{cam['name']}': {str(e)}"
+                    )
+
+            if loaded_count > 0:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Cameras Loaded",
+                    f"Successfully loaded {loaded_count} camera(s)."
+                )
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error Loading Cameras",
+                f"Failed to load cameras: {str(e)}"
+            )
 
     @QtCore.Slot(str)
     def _on_camera_added(self, camera_name: str) -> None:
@@ -690,13 +902,33 @@ class MainWindow(QtWidgets.QMainWindow):
             self.exposure_spinbox.setValue(exposure)
 
             # Slider properties
-            self.focus_slider.setValue(int(camera.get_property(cv.CAP_PROP_FOCUS)))
-            self.zoom_slider.setValue(int(camera.get_property(cv.CAP_PROP_ZOOM)))
-            self.brightness_slider.setValue(int(camera.get_property(cv.CAP_PROP_BRIGHTNESS)))
-            self.contrast_slider.setValue(int(camera.get_property(cv.CAP_PROP_CONTRAST)))
-            self.gain_slider.setValue(int(camera.get_property(cv.CAP_PROP_GAIN)))
-            self.saturation_slider.setValue(int(camera.get_property(cv.CAP_PROP_SATURATION)))
-            self.sharpness_slider.setValue(int(camera.get_property(cv.CAP_PROP_SHARPNESS)))
+            focus_val = int(camera.get_property(cv.CAP_PROP_FOCUS))
+            self.focus_slider.setValue(focus_val)
+            self.focus_value_label.setText(str(focus_val))
+
+            zoom_val = int(camera.get_property(cv.CAP_PROP_ZOOM))
+            self.zoom_slider.setValue(zoom_val)
+            self.zoom_value_label.setText(str(zoom_val))
+
+            brightness_val = int(camera.get_property(cv.CAP_PROP_BRIGHTNESS))
+            self.brightness_slider.setValue(brightness_val)
+            self.brightness_value_label.setText(str(brightness_val))
+
+            contrast_val = int(camera.get_property(cv.CAP_PROP_CONTRAST))
+            self.contrast_slider.setValue(contrast_val)
+            self.contrast_value_label.setText(str(contrast_val))
+
+            gain_val = int(camera.get_property(cv.CAP_PROP_GAIN))
+            self.gain_slider.setValue(gain_val)
+            self.gain_value_label.setText(str(gain_val))
+
+            saturation_val = int(camera.get_property(cv.CAP_PROP_SATURATION))
+            self.saturation_slider.setValue(saturation_val)
+            self.saturation_value_label.setText(str(saturation_val))
+
+            sharpness_val = int(camera.get_property(cv.CAP_PROP_SHARPNESS))
+            self.sharpness_slider.setValue(sharpness_val)
+            self.sharpness_value_label.setText(str(sharpness_val))
 
             # Unblock signals
             self.fourcc_combo.blockSignals(False)

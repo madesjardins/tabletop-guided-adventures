@@ -16,5 +16,7 @@
 
 import os
 
-ROOT_DIR_PATH = os.path.dirname(os.path.dirname(os.path.abspath(os.path.abspath(__file__))))
+ROOT_DIR_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TEMP_DIR_PATH = os.path.join(ROOT_DIR_PATH, "temp")
+SAVED_ROOT_DIR_PATH = os.path.join(ROOT_DIR_PATH, "saved")
+SAVED_CAMERAS_DIR_PATH = os.path.join(SAVED_ROOT_DIR_PATH, "cameras")

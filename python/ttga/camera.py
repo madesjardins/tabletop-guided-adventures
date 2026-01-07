@@ -43,6 +43,7 @@ class Camera(QtCore.QObject):
         name: str,
         backend: int,
         device_id: int,
+        camera_info: dict[str, any] | None = None,
         parent: QtCore.QObject | None = None
     ) -> None:
         """Initialize the camera.
@@ -51,6 +52,7 @@ class Camera(QtCore.QObject):
             name: Camera name identifier.
             backend: OpenCV capture API backend.
             device_id: Camera device ID.
+            camera_info: Optional camera info dict with 'index', 'name', 'path' keys.
             parent: Parent QObject.
         """
         super().__init__(parent)
@@ -61,7 +63,7 @@ class Camera(QtCore.QObject):
         self._device_id = device_id
 
         # Create camera feed
-        self.camera_feed = CameraFeed(device_id, backend)
+        self.camera_feed = CameraFeed(device_id, backend, camera_info=camera_info)
 
         # Frame buffer - holds 3 frames
         self._frame_buffer: list[np.ndarray | None] = [None, None, None]
@@ -146,3 +148,48 @@ class Camera(QtCore.QObject):
             Camera device ID.
         """
         return self._device_id
+
+    def get_camera_info(self) -> dict[str, any] | None:
+        """Get the camera info.
+
+        Returns:
+            Camera info dict or None.
+        """
+        return self.camera_feed.camera_info
+
+    def to_dict(self) -> dict:
+        """Serialize camera to dictionary.
+
+        Returns:
+            Dictionary containing all camera data.
+        """
+        import cv2 as cv
+
+        # Get all current properties
+        properties = {}
+        property_ids = [
+            cv.CAP_PROP_FOURCC,
+            cv.CAP_PROP_FRAME_WIDTH,
+            cv.CAP_PROP_FRAME_HEIGHT,
+            cv.CAP_PROP_EXPOSURE,
+            cv.CAP_PROP_FOCUS,
+            cv.CAP_PROP_ZOOM,
+            cv.CAP_PROP_BRIGHTNESS,
+            cv.CAP_PROP_CONTRAST,
+            cv.CAP_PROP_GAIN,
+            cv.CAP_PROP_SATURATION,
+            cv.CAP_PROP_SHARPNESS
+        ]
+
+        for prop_id in property_ids:
+            value = self.get_property(prop_id)
+            # Store property IDs as strings and values as integers to avoid JSON serialization issues
+            properties[str(prop_id)] = int(value)
+
+        return {
+            'name': self.name,
+            'backend': self._backend,
+            'device_id': self._device_id,
+            'camera_info': self.camera_feed.camera_info,
+            'properties': properties
+        }

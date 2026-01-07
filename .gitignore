@@ -221,3 +221,6 @@ vosk_models/*
 # Temp stuff
 temp/
 tmp/
+
+# Saved stuff
+saved/
