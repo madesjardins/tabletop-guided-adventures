@@ -65,12 +65,71 @@ class CameraCalibrationData:
         rvecs_list: List of rotation vectors for each calibration frame.
         tvecs_list: List of translation vectors for each calibration frame.
         mean_reprojection_error: Mean reprojection error for this data.
+        resolution: Frame resolution (width, height) used for calibration.
+        undistort_rectification: Undistortion rectification handler (auto-created).
     """
     mtx: np.ndarray
     dist: np.ndarray
     rvecs_list: list[np.ndarray]
     tvecs_list: list[np.ndarray]
     mean_reprojection_error: float
+    resolution: tuple[int, int]
+    undistort_rectification: 'UndistortRectification' = None
+
+    def __post_init__(self) -> None:
+        """Create undistortion rectification after initialization."""
+        # Create UndistortRectification from this calibration data
+        self.undistort_rectification = UndistortRectification(self)
+
+
+class UndistortRectification:
+    """Handles undistortion and rectification mapping for calibrated cameras.
+
+    This class precomputes the undistortion maps from calibration data,
+    allowing efficient frame undistortion.
+
+    Attributes:
+        mtx_prime: Optimal new camera matrix.
+        roi: Region of interest (x, y, w, h) for the undistorted image.
+        mapx: X-coordinate mapping for remapping.
+        mapy: Y-coordinate mapping for remapping.
+    """
+
+    def __init__(self, calibration_data: CameraCalibrationData) -> None:
+        """Initialize undistortion rectification from calibration data.
+
+        Args:
+            calibration_data: Camera calibration data containing mtx, dist, and resolution.
+        """
+        mtx = calibration_data.mtx
+        dist = calibration_data.dist
+        resolution = calibration_data.resolution
+
+        # Get optimal new camera matrix
+        self.mtx_prime, self.roi = cv.getOptimalNewCameraMatrix(
+            mtx, dist, resolution, 1, resolution
+        )
+
+        # Initialize undistortion and rectification map
+        self.mapx, self.mapy = cv.initUndistortRectifyMap(
+            mtx, dist, None, self.mtx_prime, resolution, 5
+        )
+
+    def undistort_frame(self, frame: np.ndarray) -> np.ndarray:
+        """Undistort a frame using precomputed maps.
+
+        Args:
+            frame: Input frame to undistort.
+
+        Returns:
+            Undistorted and cropped frame.
+        """
+        # Remap the frame using precomputed maps
+        undist_frame = cv.remap(frame, self.mapx, self.mapy, cv.INTER_LINEAR)
+
+        # Crop to ROI
+        x, y, w, h = self.roi
+        return undist_frame[y:y + h, x:x + w].copy()
 
 
 class CalibrationResult:
@@ -110,7 +169,11 @@ class CameraCalibration:
         """
         self._number_of_squares_w: int = number_of_squares_w
         self._number_of_squares_h: int = number_of_squares_h
-        self._calibration_frames: list[Optional[CalibrationFrame]] = [None, None, None]
+        self._calibration_frames: dict[CalibrationView, Optional[CalibrationFrame]] = {
+            CalibrationView.TOP: None,
+            CalibrationView.FRONT: None,
+            CalibrationView.SIDE: None
+        }
 
     @property
     def number_of_squares_w(self) -> int:
@@ -125,7 +188,7 @@ class CameraCalibration:
             value: New number of squares in width.
         """
         self._number_of_squares_w = value
-        self._calibration_frames = [None, None, None]
+        self.clear_frames()
 
     @property
     def number_of_squares_h(self) -> int:
@@ -140,7 +203,7 @@ class CameraCalibration:
             value: New number of squares in height.
         """
         self._number_of_squares_h = value
-        self._calibration_frames = [None, None, None]
+        self.clear_frames()
 
     def get_checkerboard_3d_reference_points(self) -> list[list[tuple[float, float, float]]]:
         """Get 3D reference points for checkerboard corners.
@@ -241,6 +304,14 @@ class CameraCalibration:
         """
         return self._calibration_frames[view]
 
+    def clear_frames(self) -> None:
+        """Clear all calibration frames."""
+        self._calibration_frames = {
+            CalibrationView.TOP: None,
+            CalibrationView.FRONT: None,
+            CalibrationView.SIDE: None
+        }
+
     def calibrate_camera(self) -> Optional[CameraCalibrationData]:
         """Calibrate the camera using collected calibration frames.
 
@@ -257,12 +328,12 @@ class CameraCalibration:
             ...     print(f"Camera matrix: {calib_data.mtx}")
         """
         # Check if all frames are set
-        if any(frame is None for frame in self._calibration_frames):
+        if any(frame is None for frame in self._calibration_frames.values()):
             return None
 
         # Type narrowing - we know all frames are not None
         frames: list[CalibrationFrame] = [
-            frame for frame in self._calibration_frames if frame is not None
+            frame for frame in self._calibration_frames.values() if frame is not None
         ]
 
         # Check if all frames have same dimensions
@@ -335,5 +406,6 @@ class CameraCalibration:
             dist=dist,
             rvecs_list=rvecs,
             tvecs_list=tvecs,
-            mean_reprojection_error=reprojection_error / len(object_points)
+            mean_reprojection_error=reprojection_error / len(object_points),
+            resolution=image_size
         )

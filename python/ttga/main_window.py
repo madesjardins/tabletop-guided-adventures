@@ -31,6 +31,7 @@ from PySide6 import QtWidgets, QtCore, QtGui
 from .constants import SAVED_CAMERAS_DIR_PATH
 from .viewport_widget import ViewportWidget
 from .add_camera_dialog import AddCameraDialog, BACKEND_MAP
+from .camera_calibration import CalibrationView
 
 if TYPE_CHECKING:
     from .main_core import MainCore
@@ -220,9 +221,7 @@ class MainWindow(QtWidgets.QMainWindow):
         tabs.addTab(settings_widget, "Settings")
 
         # Calibration tab
-        calibration_widget = QtWidgets.QWidget()
-        calibration_layout = QtWidgets.QVBoxLayout(calibration_widget)
-        calibration_layout.addWidget(QtWidgets.QLabel("Camera calibration will be added here"))
+        calibration_widget = self._create_camera_calibration_widget()
         tabs.addTab(calibration_widget, "Calibration")
 
         # Snapshot tab
@@ -357,6 +356,116 @@ class MainWindow(QtWidgets.QMainWindow):
 
         return widget
 
+    def _create_camera_calibration_widget(self) -> QtWidgets.QWidget:
+        """Create the camera calibration widget.
+
+        Returns:
+            Widget containing calibration controls.
+        """
+        widget = QtWidgets.QWidget()
+        main_layout = QtWidgets.QVBoxLayout(widget)
+
+        # Checkerboard settings
+        checkerboard_group = QtWidgets.QGroupBox("Checkerboard Settings")
+        checkerboard_layout = QtWidgets.QFormLayout(checkerboard_group)
+
+        self.calib_squares_w_spinbox = QtWidgets.QSpinBox()
+        self.calib_squares_w_spinbox.setRange(3, 50)
+        self.calib_squares_w_spinbox.setValue(self.core.camera_calibration.number_of_squares_w)
+        self.calib_squares_w_spinbox.valueChanged.connect(self._on_calib_squares_w_changed)
+        checkerboard_layout.addRow("Squares Width:", self.calib_squares_w_spinbox)
+
+        self.calib_squares_h_spinbox = QtWidgets.QSpinBox()
+        self.calib_squares_h_spinbox.setRange(3, 50)
+        self.calib_squares_h_spinbox.setValue(self.core.camera_calibration.number_of_squares_h)
+        self.calib_squares_h_spinbox.valueChanged.connect(self._on_calib_squares_h_changed)
+        checkerboard_layout.addRow("Squares Height:", self.calib_squares_h_spinbox)
+
+        main_layout.addWidget(checkerboard_group)
+
+        # Capture settings
+        capture_group = QtWidgets.QGroupBox("Capture Settings")
+        capture_layout = QtWidgets.QVBoxLayout(capture_group)
+
+        # Frame capture delay
+        delay_layout = QtWidgets.QHBoxLayout()
+        delay_layout.addWidget(QtWidgets.QLabel("Frame Capture Delay:"))
+        self.calib_delay_spinbox = QtWidgets.QSpinBox()
+        self.calib_delay_spinbox.setRange(0, 10)
+        self.calib_delay_spinbox.setValue(3)
+        self.calib_delay_spinbox.setSuffix(" s")
+        delay_layout.addWidget(self.calib_delay_spinbox)
+        delay_layout.addStretch()
+        capture_layout.addLayout(delay_layout)
+
+        main_layout.addWidget(capture_group)
+
+        # Capture buttons for each view
+        views_group = QtWidgets.QGroupBox("Calibration Views")
+        views_layout = QtWidgets.QVBoxLayout(views_group)
+
+        # Store button references
+        self.calib_view_buttons = {}
+
+        # Create button for each view
+        for view in [CalibrationView.TOP, CalibrationView.FRONT, CalibrationView.SIDE]:
+            view_name = view.name.capitalize()
+
+            # Create button with icon support
+            button = QtWidgets.QPushButton(f"Capture {view_name}")
+            button.setMinimumHeight(80)
+            button.setIconSize(QtCore.QSize(64, 64))
+            button.clicked.connect(lambda checked, v=view: self._on_capture_calibration_view(v))
+
+            self.calib_view_buttons[view] = button
+            views_layout.addWidget(button)
+
+        main_layout.addWidget(views_group)
+
+        # Calibration action buttons
+        action_group = QtWidgets.QGroupBox("Calibration Actions")
+        action_layout = QtWidgets.QVBoxLayout(action_group)
+
+        # Calibrate and Uncalibrate buttons side by side
+        buttons_layout = QtWidgets.QHBoxLayout()
+        self.calibrate_button = QtWidgets.QPushButton("Calibrate")
+        self.calibrate_button.clicked.connect(self._on_calibrate_camera)
+        self.calibrate_button.setEnabled(False)
+        buttons_layout.addWidget(self.calibrate_button)
+
+        self.uncalibrate_button = QtWidgets.QPushButton("Uncalibrate")
+        self.uncalibrate_button.clicked.connect(self._on_uncalibrate_camera)
+        self.uncalibrate_button.setEnabled(False)
+        buttons_layout.addWidget(self.uncalibrate_button)
+
+        action_layout.addLayout(buttons_layout)
+
+        # Mean reprojection error display
+        error_layout = QtWidgets.QHBoxLayout()
+        error_layout.addWidget(QtWidgets.QLabel("Mean Reprojection Error:"))
+        self.calib_error_spinbox = QtWidgets.QDoubleSpinBox()
+        self.calib_error_spinbox.setDecimals(5)
+        self.calib_error_spinbox.setRange(-1.0, 999999.0)
+        self.calib_error_spinbox.setValue(-1.0)
+        self.calib_error_spinbox.setReadOnly(True)
+        self.calib_error_spinbox.setButtonSymbols(QtWidgets.QAbstractSpinBox.ButtonSymbols.NoButtons)
+        error_layout.addWidget(self.calib_error_spinbox)
+        action_layout.addLayout(error_layout)
+
+        main_layout.addWidget(action_group)
+        main_layout.addStretch()
+
+        # Calibration timer
+        self.calib_capture_timer = QtCore.QTimer(self)
+        self.calib_capture_timer.setSingleShot(True)
+        self.calib_capture_timer.timeout.connect(self._on_calib_timer_timeout)
+        self.calib_pending_view = None
+
+        # Initially disable all controls
+        self._set_calibration_enabled(False)
+
+        return widget
+
     def _add_slider_to_grid(self, grid: QtWidgets.QGridLayout, row: int, label_text: str,
                             slider: QtWidgets.QSlider, reset_button: QtWidgets.QPushButton) -> QtWidgets.QLabel:
         """Add a slider row to the grid layout.
@@ -447,7 +556,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Get frames from selected cameras.
 
         Returns:
-            List of frames from selected cameras.
+            List of undistorted frames from selected cameras.
         """
         frames = []
         selected_items = self.camera_list.selectedItems()
@@ -456,7 +565,7 @@ class MainWindow(QtWidgets.QMainWindow):
             camera_name = item.text()
             try:
                 camera = self.core.camera_manager.get_camera(camera_name)
-                frame = camera.get_frame()
+                frame = camera.get_undistorted_frame()
                 if frame is not None:
                     frames.append(frame)
             except KeyError:
@@ -555,13 +664,20 @@ class MainWindow(QtWidgets.QMainWindow):
         # Update camera settings based on selection
         if len(selected_items) == 1:
             # Single camera selected - enable and load settings
-            self._set_camera_settings_enabled(True)
+            camera = self._get_selected_camera()
+            is_calibrated = camera is not None and camera.calibration_data is not None
+            self._set_camera_settings_enabled(True, is_calibrated)
             self._load_camera_settings(selected_items[0].text())
+            self._set_calibration_enabled(True)
         else:
             # Multiple or no cameras selected - disable settings
             self._set_camera_settings_enabled(False)
             self.device_id_edit.clear()
             self.device_id_edit.setPlaceholderText("No camera selected" if len(selected_items) == 0 else "Multiple cameras selected")
+            self._set_calibration_enabled(False)
+
+        # Clear calibration frames when camera selection changes
+        self._clear_calibration_frames()
 
     @QtCore.Slot(int)
     def _on_viewport_fps_changed(self, fps: int) -> None:
@@ -680,7 +796,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     'backend': backend,
                     'device_id': matched_device_id,
                     'camera_info': saved_camera_info,
-                    'properties': cam_data.get('properties', {})
+                    'properties': cam_data.get('properties', {}),
+                    'calibration_data': cam_data.get('calibration_data')
                 })
 
             if not cameras_to_load:
@@ -703,8 +820,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 # Check device conflict
                 for existing_name in existing_cameras:
                     existing_cam = self.core.camera_manager.get_camera(existing_name)
-                    if (existing_cam.get_backend() == cam['backend'] and
-                        existing_cam.get_device_id() == cam['device_id']):
+                    if (
+                        existing_cam.get_backend() == cam['backend'] and
+                        existing_cam.get_device_id() == cam['device_id']
+                    ):
                         conflicts.append(existing_name)
 
             # Remove duplicates from conflicts
@@ -767,6 +886,19 @@ class MainWindow(QtWidgets.QMainWindow):
                         else:
                             camera.set_property(prop_id_int, float(value))
 
+                    # Deserialize calibration data if present (undistort_rectification is auto-created)
+                    if cam.get('calibration_data') is not None:
+                        from .camera_calibration import CameraCalibrationData
+                        calib_dict = cam['calibration_data']
+                        camera.calibration_data = CameraCalibrationData(
+                            mtx=np.array(calib_dict['mtx']),
+                            dist=np.array(calib_dict['dist']),
+                            rvecs_list=[np.array(rvec) for rvec in calib_dict['rvecs_list']],
+                            tvecs_list=[np.array(tvec) for tvec in calib_dict['tvecs_list']],
+                            mean_reprojection_error=calib_dict['mean_reprojection_error'],
+                            resolution=tuple(calib_dict['resolution'])
+                        )
+
                     # Start camera
                     camera.start()
                     loaded_count += 1
@@ -779,6 +911,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     )
 
             if loaded_count > 0:
+                # Trigger selection change handler to refresh all UI controls
+                self._on_camera_selection_changed()
+
                 QtWidgets.QMessageBox.information(
                     self,
                     "Cameras Loaded",
@@ -835,19 +970,21 @@ class MainWindow(QtWidgets.QMainWindow):
         # Accept the close event
         event.accept()
 
-    def _set_camera_settings_enabled(self, enabled: bool) -> None:
+    def _set_camera_settings_enabled(self, enabled: bool, is_calibrated: bool = False) -> None:
         """Enable or disable camera settings controls.
 
         Args:
             enabled: True to enable, False to disable.
+            is_calibrated: True if camera is calibrated (disables resolution/focus/zoom).
         """
         self.fourcc_combo.setEnabled(enabled)
-        self.resolution_combo.setEnabled(enabled)
+        # Resolution, focus, and zoom are disabled when camera is calibrated
+        self.resolution_combo.setEnabled(enabled and not is_calibrated)
         self.exposure_spinbox.setEnabled(enabled)
-        self.focus_slider.setEnabled(enabled)
-        self.focus_reset.setEnabled(enabled)
-        self.zoom_slider.setEnabled(enabled)
-        self.zoom_reset.setEnabled(enabled)
+        self.focus_slider.setEnabled(enabled and not is_calibrated)
+        self.focus_reset.setEnabled(enabled and not is_calibrated)
+        self.zoom_slider.setEnabled(enabled and not is_calibrated)
+        self.zoom_reset.setEnabled(enabled and not is_calibrated)
         self.brightness_slider.setEnabled(enabled)
         self.brightness_reset.setEnabled(enabled)
         self.contrast_slider.setEnabled(enabled)
@@ -1068,3 +1205,278 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_sharpness_reset(self) -> None:
         """Reset sharpness to default."""
         self.sharpness_slider.setValue(self.sharpness_slider.property("default_value"))
+
+    # Calibration handlers
+    def _set_calibration_enabled(self, enabled: bool) -> None:
+        """Enable or disable calibration controls based on camera state.
+
+        Args:
+            enabled: True if camera is selected, False otherwise.
+        """
+        camera = self._get_selected_camera()
+        is_calibrated = camera is not None and camera.calibration_data is not None
+
+        # Checkerboard settings and capture buttons disabled if calibrated
+        self.calib_squares_w_spinbox.setEnabled(enabled and not is_calibrated)
+        self.calib_squares_h_spinbox.setEnabled(enabled and not is_calibrated)
+        self.calib_delay_spinbox.setEnabled(enabled and not is_calibrated)
+        for button in self.calib_view_buttons.values():
+            button.setEnabled(enabled and not is_calibrated)
+
+        # Update calibration action buttons
+        self._update_calibration_buttons()
+
+    def _clear_calibration_frames(self) -> None:
+        """Clear all calibration frames and button images."""
+        self.core.camera_calibration.clear_frames()
+
+        # Clear button icons
+        for view, button in self.calib_view_buttons.items():
+            button.setIcon(QtGui.QIcon())
+            button.setText(f"Capture {view.name.capitalize()}")
+
+    def _update_calibration_buttons(self) -> None:
+        """Update calibration button states based on current state."""
+        camera = self._get_selected_camera()
+
+        if camera is None:
+            self.calibrate_button.setEnabled(False)
+            self.uncalibrate_button.setEnabled(False)
+            self.calib_error_spinbox.setValue(-1.0)
+            return
+
+        is_calibrated = camera.calibration_data is not None
+
+        # Calibrate button enabled when all 3 views have frames and not calibrated
+        all_frames_captured = all(
+            self.core.camera_calibration.get_calibration_frame(view) is not None
+            for view in [CalibrationView.TOP, CalibrationView.FRONT, CalibrationView.SIDE]
+        )
+        self.calibrate_button.setEnabled(all_frames_captured and not is_calibrated)
+
+        # Uncalibrate button enabled when camera is calibrated
+        self.uncalibrate_button.setEnabled(is_calibrated)
+
+        # Update error display
+        if is_calibrated:
+            self.calib_error_spinbox.setValue(camera.calibration_data.mean_reprojection_error)
+        else:
+            self.calib_error_spinbox.setValue(-1.0)
+
+    @QtCore.Slot(int)
+    def _on_calib_squares_w_changed(self, value: int) -> None:
+        """Handle checkerboard width change."""
+        self.core.camera_calibration.number_of_squares_w = value
+        self._clear_calibration_frames()
+        self._update_calibration_buttons()
+
+    @QtCore.Slot(int)
+    def _on_calib_squares_h_changed(self, value: int) -> None:
+        """Handle checkerboard height change."""
+        self.core.camera_calibration.number_of_squares_h = value
+        self._clear_calibration_frames()
+        self._update_calibration_buttons()
+
+    @QtCore.Slot(CalibrationView)
+    def _on_capture_calibration_view(self, view: CalibrationView) -> None:
+        """Handle capture button click for a specific view.
+
+        Args:
+            view: The calibration view to capture.
+        """
+        # Get selected camera
+        camera = self._get_selected_camera()
+        if not camera:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "No Camera Selected",
+                "Please select a camera to capture calibration frames."
+            )
+            return
+
+        # Get delay
+        delay_seconds = self.calib_delay_spinbox.value()
+
+        # Store pending view
+        self.calib_pending_view = view
+
+        # Disable buttons during capture
+        self._set_calibration_enabled(False)
+
+        if delay_seconds > 0:
+            # Update button text to show countdown
+            button = self.calib_view_buttons[view]
+            button.setText(f"Capturing in {delay_seconds}s...")
+
+            # Start timer
+            self.calib_capture_timer.start(delay_seconds * 1000)
+        else:
+            # Capture immediately
+            self._capture_calibration_frame(view)
+
+    @QtCore.Slot()
+    def _on_calib_timer_timeout(self) -> None:
+        """Handle calibration capture timer timeout."""
+        if self.calib_pending_view is not None:
+            self._capture_calibration_frame(self.calib_pending_view)
+            self.calib_pending_view = None
+
+    def _capture_calibration_frame(self, view: CalibrationView) -> None:
+        """Capture a calibration frame for the specified view.
+
+        Args:
+            view: The calibration view to capture.
+        """
+        # Get selected camera
+        camera = self._get_selected_camera()
+        if not camera:
+            self._set_calibration_enabled(True)
+            return
+
+        # Get current frame
+        frame = camera.get_frame()
+        if frame is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "No Frame Available",
+                "No frame available from camera. Please try again."
+            )
+            self._set_calibration_enabled(True)
+            return
+
+        # Try to create calibration frame
+        calib_frame = self.core.camera_calibration.make_calibration_frame(frame)
+
+        if calib_frame is None:
+            # Clear stored frame for this view
+            self.core.camera_calibration.set_calibration_frame(view, None)
+
+            # Clear button icon and reset text
+            button = self.calib_view_buttons[view]
+            button.setIcon(QtGui.QIcon())
+            button.setText(f"Capture {view.name.capitalize()}")
+
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Checkerboard Not Found",
+                f"Could not detect checkerboard pattern in captured frame.\n\n"
+                f"Please ensure:\n"
+                f"- The checkerboard is fully visible\n"
+                f"- The checkerboard has {self.core.camera_calibration.number_of_squares_w}x"
+                f"{self.core.camera_calibration.number_of_squares_h} squares\n"
+                f"- The image is well-lit and in focus"
+            )
+
+            self._set_calibration_enabled(True)
+            return
+
+        # Store calibration frame
+        self.core.camera_calibration.set_calibration_frame(view, calib_frame)
+
+        # Draw corners on the image for visualization
+        gray_with_corners = calib_frame.image.copy()
+        checkerboard_dim = (
+            self.core.camera_calibration.number_of_squares_w - 1,
+            self.core.camera_calibration.number_of_squares_h - 1
+        )
+        cv.drawChessboardCorners(gray_with_corners, checkerboard_dim, calib_frame.corners, True)
+
+        # Convert to RGB for Qt
+        rgb_image = cv.cvtColor(gray_with_corners, cv.COLOR_GRAY2RGB)
+
+        # Create QPixmap from image
+        h, w, ch = rgb_image.shape
+        bytes_per_line = ch * w
+        q_image = QtGui.QImage(
+            rgb_image.data,
+            w,
+            h,
+            bytes_per_line,
+            QtGui.QImage.Format.Format_RGB888
+        )
+        pixmap = QtGui.QPixmap.fromImage(q_image)
+
+        # Scale pixmap to button size (64x64)
+        scaled_pixmap = pixmap.scaled(
+            64, 64,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation
+        )
+
+        # Set button icon and update text
+        button = self.calib_view_buttons[view]
+        button.setIcon(QtGui.QIcon(scaled_pixmap))
+        button.setText(f"{view.name.capitalize()} ")
+
+        # Re-enable controls
+        self._set_calibration_enabled(True)
+
+        # Update calibration button states
+        self._update_calibration_buttons()
+
+    @QtCore.Slot()
+    def _on_calibrate_camera(self) -> None:
+        """Handle calibrate button click."""
+        camera = self._get_selected_camera()
+        if not camera:
+            return
+
+        # Get current frame resolution
+        frame = camera.get_frame()
+        if frame is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "No Frame Available",
+                "Cannot determine frame resolution. Please ensure camera is active."
+            )
+            return
+
+        resolution = (frame.shape[1], frame.shape[0])  # (width, height)
+
+        # Call calibrate_camera
+        calib_data = self.core.camera_calibration.calibrate_camera()
+
+        if calib_data is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Calibration Failed",
+                "Camera calibration failed. Please ensure all calibration frames are valid."
+            )
+            return
+
+        # Add resolution to calibration data
+        calib_data.resolution = resolution
+
+        # Store calibration data in camera (undistort_rectification is auto-created)
+        camera.calibration_data = calib_data
+
+        # Update UI - disable focus/zoom since camera is now calibrated
+        self._set_camera_settings_enabled(True, is_calibrated=True)
+        self._set_calibration_enabled(True)
+        self._update_calibration_buttons()
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Calibration Successful",
+            f"Camera calibrated successfully!\n\n"
+            f"Mean Reprojection Error: {calib_data.mean_reprojection_error:.5f}\n"
+            f"Resolution: {resolution[0]}x{resolution[1]}"
+        )
+
+    @QtCore.Slot()
+    def _on_uncalibrate_camera(self) -> None:
+        """Handle uncalibrate button click."""
+        camera = self._get_selected_camera()
+        if not camera:
+            return
+
+        # Remove calibration data (undistort_rectification is inside it)
+        camera.calibration_data = None
+
+        # Clear calibration frames
+        self._clear_calibration_frames()
+
+        # Update UI - re-enable focus/zoom since camera is no longer calibrated
+        self._set_camera_settings_enabled(True, is_calibrated=False)
+        self._set_calibration_enabled(True)
+        self._update_calibration_buttons()
