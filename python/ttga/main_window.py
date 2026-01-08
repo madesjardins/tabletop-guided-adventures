@@ -64,6 +64,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.core.camera_manager.camera_added.connect(self._on_camera_added)
         self.core.camera_manager.camera_removed.connect(self._on_camera_removed)
 
+        # Connect projector manager signals
+        self.core.projector_manager.projector_added.connect(self._on_projector_added)
+        self.core.projector_manager.projector_removed.connect(self._on_projector_removed)
+
         # Set up viewport callbacks and start timer
         self.viewport.set_get_frames_callback(
             self._get_selected_camera_frames,
@@ -118,42 +122,84 @@ class MainWindow(QtWidgets.QMainWindow):
         main_layout.setRowStretch(1, 2)
 
     def _create_camera_list_group(self) -> QtWidgets.QGroupBox:
-        """Create the camera list group with buttons.
+        """Create the camera/projector list group with tabs.
 
         Returns:
-            Group box containing camera list and control buttons.
+            Group box containing camera and projector tabs.
         """
-        group = QtWidgets.QGroupBox("Cameras")
+        group = QtWidgets.QGroupBox("Cameras & Projectors")
         group.setFixedWidth(350)
         layout = QtWidgets.QVBoxLayout(group)
 
-        # Camera list
+        # Create tab widget
+        tabs = QtWidgets.QTabWidget()
+
+        # Cameras tab
+        cameras_widget = QtWidgets.QWidget()
+        cameras_layout = QtWidgets.QVBoxLayout(cameras_widget)
+
         self.camera_list = QtWidgets.QListWidget()
         self.camera_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         self.camera_list.itemSelectionChanged.connect(self._on_camera_selection_changed)
-        layout.addWidget(self.camera_list)
+        cameras_layout.addWidget(self.camera_list)
 
-        # Buttons in 2x2 grid
-        button_layout = QtWidgets.QGridLayout()
+        # Camera buttons in 2x2 grid
+        camera_button_layout = QtWidgets.QGridLayout()
 
         self.add_camera_button = QtWidgets.QPushButton("Add")
         self.add_camera_button.clicked.connect(self._on_add_camera)
-        button_layout.addWidget(self.add_camera_button, 0, 0)
+        camera_button_layout.addWidget(self.add_camera_button, 0, 0)
 
         self.delete_camera_button = QtWidgets.QPushButton("Delete")
         self.delete_camera_button.clicked.connect(self._on_delete_camera)
         self.delete_camera_button.setEnabled(False)
-        button_layout.addWidget(self.delete_camera_button, 0, 1)
+        camera_button_layout.addWidget(self.delete_camera_button, 0, 1)
 
         self.load_camera_button = QtWidgets.QPushButton("Load")
         self.load_camera_button.clicked.connect(self._on_load_camera)
-        button_layout.addWidget(self.load_camera_button, 1, 0)
+        camera_button_layout.addWidget(self.load_camera_button, 1, 0)
 
         self.save_camera_button = QtWidgets.QPushButton("Save")
         self.save_camera_button.clicked.connect(self._on_save_camera)
-        button_layout.addWidget(self.save_camera_button, 1, 1)
+        camera_button_layout.addWidget(self.save_camera_button, 1, 1)
 
-        layout.addLayout(button_layout)
+        cameras_layout.addLayout(camera_button_layout)
+        tabs.addTab(cameras_widget, "Cameras")
+
+        # Projectors tab
+        projectors_widget = QtWidgets.QWidget()
+        projectors_layout = QtWidgets.QVBoxLayout(projectors_widget)
+
+        self.projector_list = QtWidgets.QListWidget()
+        self.projector_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.projector_list.itemSelectionChanged.connect(self._on_projector_selection_changed)
+        self.projector_list.itemDoubleClicked.connect(self._on_projector_double_clicked)
+        projectors_layout.addWidget(self.projector_list)
+
+        # Projector buttons in 2x2 grid
+        projector_button_layout = QtWidgets.QGridLayout()
+
+        self.add_projector_button = QtWidgets.QPushButton("Add")
+        self.add_projector_button.clicked.connect(self._on_add_projector)
+        projector_button_layout.addWidget(self.add_projector_button, 0, 0)
+
+        self.delete_projector_button = QtWidgets.QPushButton("Delete")
+        self.delete_projector_button.clicked.connect(self._on_delete_projector)
+        self.delete_projector_button.setEnabled(False)
+        projector_button_layout.addWidget(self.delete_projector_button, 0, 1)
+
+        self.load_projector_button = QtWidgets.QPushButton("Load")
+        self.load_projector_button.clicked.connect(self._on_load_projector)
+        projector_button_layout.addWidget(self.load_projector_button, 1, 0)
+
+        self.save_projector_button = QtWidgets.QPushButton("Save")
+        self.save_projector_button.clicked.connect(self._on_save_projector)
+        projector_button_layout.addWidget(self.save_projector_button, 1, 1)
+
+        projectors_layout.addLayout(projector_button_layout)
+        tabs.addTab(projectors_widget, "Projectors")
+
+        layout.addWidget(tabs)
 
         return group
 
@@ -1007,6 +1053,280 @@ class MainWindow(QtWidgets.QMainWindow):
         for item in items:
             row = self.camera_list.row(item)
             self.camera_list.takeItem(row)
+
+    @QtCore.Slot(str)
+    def _on_projector_added(self, projector_name: str) -> None:
+        """Handle projector added signal.
+
+        Args:
+            projector_name: Name of the added projector.
+        """
+        from .projector_dialog import ProjectorDialog
+
+        # Add to list widget
+        projector = self.core.projector_manager.get_projector(projector_name)
+        item = QtWidgets.QListWidgetItem(projector_name)
+        # Set tooltip with resolution
+        item.setToolTip(f"{projector.resolution[0]}x{projector.resolution[1]}")
+        self.projector_list.addItem(item)
+
+        # Create and show projector dialog automatically
+        dialog = ProjectorDialog(projector.name, projector.resolution, self)
+        projector.dialog = dialog
+        dialog.show()
+
+    @QtCore.Slot(str)
+    def _on_projector_removed(self, projector_name: str) -> None:
+        """Handle projector removed signal.
+
+        Args:
+            projector_name: Name of the removed projector.
+        """
+        # Remove from list widget
+        items = self.projector_list.findItems(projector_name, QtCore.Qt.MatchFlag.MatchExactly)
+        for item in items:
+            row = self.projector_list.row(item)
+            self.projector_list.takeItem(row)
+
+    @QtCore.Slot()
+    def _on_projector_selection_changed(self) -> None:
+        """Handle projector list selection change."""
+        selected_items = self.projector_list.selectedItems()
+        has_selection = len(selected_items) > 0
+
+        # Enable delete button only if at least one projector is selected
+        self.delete_projector_button.setEnabled(has_selection)
+
+    @QtCore.Slot(QtWidgets.QListWidgetItem)
+    def _on_projector_double_clicked(self, item: QtWidgets.QListWidgetItem) -> None:
+        """Handle projector double click to open dialog.
+
+        Args:
+            item: The clicked list item.
+        """
+        from .projector_dialog import ProjectorDialog
+
+        projector_name = item.text()
+        try:
+            projector = self.core.projector_manager.get_projector(projector_name)
+
+            # If dialog doesn't exist or was closed, create and show it
+            if projector.dialog is None or not projector.dialog.isVisible():
+                dialog = ProjectorDialog(projector.name, projector.resolution, self)
+                projector.dialog = dialog
+                dialog.show()
+
+        except KeyError:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Projector Not Found",
+                f"Projector '{projector_name}' not found."
+            )
+
+    @QtCore.Slot()
+    def _on_add_projector(self) -> None:
+        """Handle add projector button click."""
+        from .add_projector_dialog import AddProjectorDialog
+
+        # Get existing projector names
+        existing_names = [p.name for p in self.core.projector_manager.get_all_projectors()]
+
+        # Show dialog
+        dialog = AddProjectorDialog(existing_names, self)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            try:
+                self.core.projector_manager.add_projector(
+                    dialog.projector_name,
+                    dialog.projector_resolution
+                )
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Error Adding Projector",
+                    f"Failed to add projector: {str(e)}"
+                )
+
+    @QtCore.Slot()
+    def _on_delete_projector(self) -> None:
+        """Handle delete projector button click."""
+        selected_items = self.projector_list.selectedItems()
+        if not selected_items:
+            return
+
+        projector_names = [item.text() for item in selected_items]
+
+        # Confirm deletion
+        if len(projector_names) == 1:
+            message = f"Are you sure you want to delete projector '{projector_names[0]}'?"
+        else:
+            message = f"Are you sure you want to delete {len(projector_names)} projectors?"
+
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Delete Projector(s)",
+            message,
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No
+        )
+
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            # Remove projectors
+            for projector_name in projector_names:
+                try:
+                    self.core.projector_manager.remove_projector(projector_name)
+                except Exception as e:
+                    QtWidgets.QMessageBox.critical(
+                        self,
+                        "Error Deleting Projector",
+                        f"Failed to delete projector '{projector_name}': {str(e)}"
+                    )
+
+    @QtCore.Slot()
+    def _on_save_projector(self) -> None:
+        """Handle save projector button click."""
+        import json
+        import os
+        from . import constants
+
+        # Get all projectors data
+        projectors_data = self.core.projector_manager.serialize_projectors()
+
+        if not projectors_data:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No Projectors",
+                "No projectors to save."
+            )
+            return
+
+        # Ensure saved projectors directory exists
+        os.makedirs(constants.SAVED_PROJECTORS_DIR_PATH, exist_ok=True)
+
+        # Show file save dialog
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save Projectors",
+            constants.SAVED_PROJECTORS_DIR_PATH,
+            "JSON Files (*.json)"
+        )
+
+        if file_path:
+            try:
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+                with open(file_path, 'w') as f:
+                    json.dump(projectors_data, f, indent=2)
+
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Projectors Saved",
+                    f"Successfully saved {len(projectors_data)} projector(s)."
+                )
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Error Saving Projectors",
+                    f"Failed to save projectors: {str(e)}"
+                )
+
+    @QtCore.Slot()
+    def _on_load_projector(self) -> None:
+        """Handle load projector button click."""
+        import json
+        import os
+        from . import constants
+        from .projector import Projector
+
+        # Ensure saved projectors directory exists
+        os.makedirs(constants.SAVED_PROJECTORS_DIR_PATH, exist_ok=True)
+
+        # Show file open dialog
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Load Projectors",
+            constants.SAVED_PROJECTORS_DIR_PATH,
+            "JSON Files (*.json)"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, 'r') as f:
+                projectors_data = json.load(f)
+
+            if not projectors_data:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "No Projectors",
+                    "No projectors found in file."
+                )
+                return
+
+            # Check for conflicts
+            conflicts = []
+            for proj_data in projectors_data:
+                if self.core.projector_manager.projector_exists(proj_data['name']):
+                    conflicts.append(proj_data['name'])
+
+            # Ask user if they want to replace conflicting projectors
+            if conflicts:
+                message = "The following projectors already exist:\n\n"
+                message += "\n".join(conflicts)
+                message += "\n\nDo you want to replace them?"
+
+                reply = QtWidgets.QMessageBox.question(
+                    self,
+                    "Replace Projectors?",
+                    message,
+                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                    QtWidgets.QMessageBox.StandardButton.No
+                )
+
+                if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return
+
+                # Remove conflicting projectors
+                for conflict_name in conflicts:
+                    try:
+                        self.core.projector_manager.remove_projector(conflict_name)
+                    except Exception as e:
+                        QtWidgets.QMessageBox.warning(
+                            self,
+                            "Error Removing Projector",
+                            f"Failed to remove projector '{conflict_name}': {str(e)}"
+                        )
+
+            # Load projectors
+            loaded_count = 0
+            for proj_data in projectors_data:
+                try:
+                    projector = Projector.from_dict(proj_data)
+                    self.core.projector_manager.add_projector(
+                        projector.name,
+                        projector.resolution
+                    )
+                    loaded_count += 1
+                except Exception as e:
+                    QtWidgets.QMessageBox.warning(
+                        self,
+                        "Error Loading Projector",
+                        f"Failed to load projector '{proj_data.get('name', 'Unknown')}': {str(e)}"
+                    )
+
+            if loaded_count > 0:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Projectors Loaded",
+                    f"Successfully loaded {loaded_count} projector(s)."
+                )
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error Loading Projectors",
+                f"Failed to load projectors: {str(e)}"
+            )
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Handle window close event.
