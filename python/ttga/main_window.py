@@ -68,6 +68,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.core.projector_manager.projector_added.connect(self._on_projector_added)
         self.core.projector_manager.projector_removed.connect(self._on_projector_removed)
 
+        # Connect zone manager signals
+        self.core.zone_manager.zone_added.connect(self._on_zone_added)
+        self.core.zone_manager.zone_removed.connect(self._on_zone_removed)
+
+        # Initialize zone settings UI state
+        self._on_zone_selection_changed()
+
         # Set up viewport callbacks and start timer
         self.viewport.set_get_frames_callback(
             self._get_selected_camera_frames,
@@ -81,6 +88,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # File menu
         file_menu = menu_bar.addMenu("&File")
+
+        # Save master configuration action
+        save_master_action = QtGui.QAction("&Save Master Configuration", self)
+        save_master_action.triggered.connect(self._on_save_master_configuration)
+        file_menu.addAction(save_master_action)
+
+        # Load master configuration action
+        load_master_action = QtGui.QAction("&Load Master Configuration", self)
+        load_master_action.triggered.connect(self._on_load_master_configuration)
+        file_menu.addAction(load_master_action)
+
+        file_menu.addSeparator()
 
         # Quit action
         quit_action = QtGui.QAction("&Quit", self)
@@ -122,12 +141,12 @@ class MainWindow(QtWidgets.QMainWindow):
         main_layout.setRowStretch(1, 2)
 
     def _create_camera_list_group(self) -> QtWidgets.QGroupBox:
-        """Create the camera/projector list group with tabs.
+        """Create the camera/projector/zone list group with tabs.
 
         Returns:
-            Group box containing camera and projector tabs.
+            Group box containing camera, projector, and zone tabs.
         """
-        group = QtWidgets.QGroupBox("Cameras & Projectors")
+        group = QtWidgets.QGroupBox("Cameras, Projectors & Zones")
         group.setFixedWidth(350)
         layout = QtWidgets.QVBoxLayout(group)
 
@@ -161,6 +180,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.save_camera_button = QtWidgets.QPushButton("Save")
         self.save_camera_button.clicked.connect(self._on_save_camera)
+        self.save_camera_button.setEnabled(False)
         camera_button_layout.addWidget(self.save_camera_button, 1, 1)
 
         cameras_layout.addLayout(camera_button_layout)
@@ -194,10 +214,44 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.save_projector_button = QtWidgets.QPushButton("Save")
         self.save_projector_button.clicked.connect(self._on_save_projector)
+        self.save_projector_button.setEnabled(False)
         projector_button_layout.addWidget(self.save_projector_button, 1, 1)
 
         projectors_layout.addLayout(projector_button_layout)
         tabs.addTab(projectors_widget, "Projectors")
+
+        # Zones tab
+        zones_widget = QtWidgets.QWidget()
+        zones_layout = QtWidgets.QVBoxLayout(zones_widget)
+
+        self.zone_list = QtWidgets.QListWidget()
+        self.zone_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.zone_list.itemSelectionChanged.connect(self._on_zone_selection_changed)
+        zones_layout.addWidget(self.zone_list)
+
+        # Zone buttons in 2x2 grid
+        zone_button_layout = QtWidgets.QGridLayout()
+
+        self.add_zone_button = QtWidgets.QPushButton("Add")
+        self.add_zone_button.clicked.connect(self._on_add_zone)
+        zone_button_layout.addWidget(self.add_zone_button, 0, 0)
+
+        self.delete_zone_button = QtWidgets.QPushButton("Delete")
+        self.delete_zone_button.clicked.connect(self._on_delete_zone)
+        self.delete_zone_button.setEnabled(False)
+        zone_button_layout.addWidget(self.delete_zone_button, 0, 1)
+
+        self.load_zone_button = QtWidgets.QPushButton("Load")
+        self.load_zone_button.clicked.connect(self._on_load_zone)
+        zone_button_layout.addWidget(self.load_zone_button, 1, 0)
+
+        self.save_zone_button = QtWidgets.QPushButton("Save")
+        self.save_zone_button.clicked.connect(self._on_save_zone)
+        self.save_zone_button.setEnabled(False)
+        zone_button_layout.addWidget(self.save_zone_button, 1, 1)
+
+        zones_layout.addLayout(zone_button_layout)
+        tabs.addTab(zones_widget, "Zones")
 
         layout.addWidget(tabs)
 
@@ -211,11 +265,9 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         tabs = QtWidgets.QTabWidget()
 
-        # Zones tab
-        zones_widget = QtWidgets.QWidget()
-        zones_layout = QtWidgets.QVBoxLayout(zones_widget)
-        zones_layout.addWidget(QtWidgets.QLabel("Zones configuration will be added here"))
-        tabs.addTab(zones_widget, "Zones")
+        # Zone Settings tab
+        zone_settings_widget = self._create_zone_settings_widget()
+        tabs.addTab(zone_settings_widget, "Zone Settings")
 
         # Voice tab
         voice_widget = QtWidgets.QWidget()
@@ -254,6 +306,659 @@ class MainWindow(QtWidgets.QMainWindow):
 
         return tabs
 
+    def _create_zone_settings_widget(self) -> QtWidgets.QWidget:
+        """Create the zone settings widget.
+
+        Returns:
+            Widget containing zone settings controls.
+        """
+        widget = QtWidgets.QWidget()
+        main_layout = QtWidgets.QHBoxLayout(widget)
+
+        # Left section: Zone properties
+        left_section = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_section)
+
+        # Zone properties group
+        properties_group = QtWidgets.QGroupBox("Zone Properties")
+        properties_layout = QtWidgets.QFormLayout(properties_group)
+
+        # Zone name (read-only display)
+        self.zone_name_label = QtWidgets.QLabel("No zone selected")
+        properties_layout.addRow("Name:", self.zone_name_label)
+
+        # Dimensions
+        dimensions_layout = QtWidgets.QHBoxLayout()
+        self.zone_width_spinbox = QtWidgets.QDoubleSpinBox()
+        self.zone_width_spinbox.setRange(0.0001, 99999.9999)
+        self.zone_width_spinbox.setDecimals(4)
+        self.zone_width_spinbox.setValue(34.0)
+        self.zone_width_spinbox.valueChanged.connect(self._on_zone_width_changed)
+        dimensions_layout.addWidget(self.zone_width_spinbox)
+
+        dimensions_layout.addWidget(QtWidgets.QLabel("×"))
+
+        self.zone_height_spinbox = QtWidgets.QDoubleSpinBox()
+        self.zone_height_spinbox.setRange(0.0001, 99999.9999)
+        self.zone_height_spinbox.setDecimals(4)
+        self.zone_height_spinbox.setValue(22.0)
+        self.zone_height_spinbox.valueChanged.connect(self._on_zone_height_changed)
+        dimensions_layout.addWidget(self.zone_height_spinbox)
+
+        properties_layout.addRow("Dimensions:", dimensions_layout)
+
+        # Unit
+        self.zone_unit_combo = QtWidgets.QComboBox()
+        self.zone_unit_combo.addItems(["mm", "cm", "in", "px"])
+        self.zone_unit_combo.setCurrentText("in")
+        self.zone_unit_combo.currentTextChanged.connect(self._on_zone_unit_changed)
+        properties_layout.addRow("Unit:", self.zone_unit_combo)
+
+        # Resolution (pixels per unit)
+        self.zone_resolution_spinbox = QtWidgets.QSpinBox()
+        self.zone_resolution_spinbox.setRange(1, 99999)
+        self.zone_resolution_spinbox.setValue(50)
+        self.zone_resolution_spinbox.valueChanged.connect(self._on_zone_resolution_changed)
+        properties_layout.addRow("Pixels per unit:", self.zone_resolution_spinbox)
+
+        # Enable camera mapping checkbox
+        self.zone_camera_enabled_checkbox = QtWidgets.QCheckBox()
+        self.zone_camera_enabled_checkbox.stateChanged.connect(self._on_zone_camera_enabled_changed)
+        properties_layout.addRow("Enable camera mapping:", self.zone_camera_enabled_checkbox)
+
+        # Enable projector mapping checkbox
+        self.zone_projector_enabled_checkbox = QtWidgets.QCheckBox()
+        self.zone_projector_enabled_checkbox.stateChanged.connect(self._on_zone_projector_enabled_changed)
+        properties_layout.addRow("Enable projector mapping:", self.zone_projector_enabled_checkbox)
+
+        # Draw locked borders checkbox (applies to both camera and projector)
+        self.zone_draw_locked_borders_checkbox = QtWidgets.QCheckBox()
+        self.zone_draw_locked_borders_checkbox.setChecked(True)
+        self.zone_draw_locked_borders_checkbox.stateChanged.connect(self._on_zone_draw_locked_borders_changed)
+        properties_layout.addRow("Draw locked borders:", self.zone_draw_locked_borders_checkbox)
+
+        left_layout.addWidget(properties_group)
+        left_layout.addStretch()
+        main_layout.addWidget(left_section)
+
+        # Middle section: Camera mapping
+        self.camera_section = QtWidgets.QWidget()
+        camera_layout = QtWidgets.QVBoxLayout(self.camera_section)
+
+        # Camera mapping group
+        self.zone_camera_mapping_group = QtWidgets.QGroupBox("Camera Mapping")
+        camera_mapping_layout = QtWidgets.QVBoxLayout(self.zone_camera_mapping_group)
+
+        # Camera selection
+        camera_selection_layout = QtWidgets.QHBoxLayout()
+        camera_selection_layout.addWidget(QtWidgets.QLabel("Camera:"))
+        self.zone_camera_combo = QtWidgets.QComboBox()
+        self.zone_camera_combo.currentTextChanged.connect(self._on_zone_camera_changed)
+        camera_selection_layout.addWidget(self.zone_camera_combo)
+        camera_mapping_layout.addLayout(camera_selection_layout)
+
+        # Vertices in a form layout
+        vertices_form = QtWidgets.QFormLayout()
+
+        # P0: Cyan
+        p0_layout = QtWidgets.QHBoxLayout()
+        self.zone_camera_p0_x = QtWidgets.QSpinBox()
+        self.zone_camera_p0_x.setRange(0, 99999)
+        self.zone_camera_p0_x.setValue(128)
+        self.zone_camera_p0_x.valueChanged.connect(self._on_zone_camera_vertex_changed)
+        p0_layout.addWidget(self.zone_camera_p0_x)
+        self.zone_camera_p0_y = QtWidgets.QSpinBox()
+        self.zone_camera_p0_y.setRange(0, 99999)
+        self.zone_camera_p0_y.setValue(128)
+        self.zone_camera_p0_y.valueChanged.connect(self._on_zone_camera_vertex_changed)
+        p0_layout.addWidget(self.zone_camera_p0_y)
+        vertices_form.addRow("P0 (Cyan):", p0_layout)
+
+        # P1: Magenta
+        p1_layout = QtWidgets.QHBoxLayout()
+        self.zone_camera_p1_x = QtWidgets.QSpinBox()
+        self.zone_camera_p1_x.setRange(0, 99999)
+        self.zone_camera_p1_x.setValue(384)
+        self.zone_camera_p1_x.valueChanged.connect(self._on_zone_camera_vertex_changed)
+        p1_layout.addWidget(self.zone_camera_p1_x)
+        self.zone_camera_p1_y = QtWidgets.QSpinBox()
+        self.zone_camera_p1_y.setRange(0, 99999)
+        self.zone_camera_p1_y.setValue(128)
+        self.zone_camera_p1_y.valueChanged.connect(self._on_zone_camera_vertex_changed)
+        p1_layout.addWidget(self.zone_camera_p1_y)
+        vertices_form.addRow("P1 (Magenta):", p1_layout)
+
+        # P2: Yellow
+        p2_layout = QtWidgets.QHBoxLayout()
+        self.zone_camera_p2_x = QtWidgets.QSpinBox()
+        self.zone_camera_p2_x.setRange(0, 99999)
+        self.zone_camera_p2_x.setValue(384)
+        self.zone_camera_p2_x.valueChanged.connect(self._on_zone_camera_vertex_changed)
+        p2_layout.addWidget(self.zone_camera_p2_x)
+        self.zone_camera_p2_y = QtWidgets.QSpinBox()
+        self.zone_camera_p2_y.setRange(0, 99999)
+        self.zone_camera_p2_y.setValue(256)
+        self.zone_camera_p2_y.valueChanged.connect(self._on_zone_camera_vertex_changed)
+        p2_layout.addWidget(self.zone_camera_p2_y)
+        vertices_form.addRow("P2 (Yellow):", p2_layout)
+
+        # P3: White
+        p3_layout = QtWidgets.QHBoxLayout()
+        self.zone_camera_p3_x = QtWidgets.QSpinBox()
+        self.zone_camera_p3_x.setRange(0, 99999)
+        self.zone_camera_p3_x.setValue(128)
+        self.zone_camera_p3_x.valueChanged.connect(self._on_zone_camera_vertex_changed)
+        p3_layout.addWidget(self.zone_camera_p3_x)
+        self.zone_camera_p3_y = QtWidgets.QSpinBox()
+        self.zone_camera_p3_y.setRange(0, 99999)
+        self.zone_camera_p3_y.setValue(256)
+        self.zone_camera_p3_y.valueChanged.connect(self._on_zone_camera_vertex_changed)
+        p3_layout.addWidget(self.zone_camera_p3_y)
+        vertices_form.addRow("P3 (White):", p3_layout)
+
+        camera_mapping_layout.addLayout(vertices_form)
+
+        # Lock vertices checkbox
+        self.zone_camera_lock_vertices_checkbox = QtWidgets.QCheckBox("Lock vertices")
+        self.zone_camera_lock_vertices_checkbox.stateChanged.connect(self._on_zone_camera_lock_vertices_changed)
+        camera_mapping_layout.addWidget(self.zone_camera_lock_vertices_checkbox)
+
+        camera_layout.addWidget(self.zone_camera_mapping_group)
+        camera_layout.addStretch()
+        # Store reference to the camera layout for spacer management
+        self.camera_section_layout = camera_layout
+        main_layout.addWidget(self.camera_section)
+
+        # Right section: Projector mapping
+        self.projector_section = QtWidgets.QWidget()
+        projector_layout = QtWidgets.QVBoxLayout(self.projector_section)
+
+        # Projector mapping group
+        self.zone_projector_mapping_group = QtWidgets.QGroupBox("Projector Mapping")
+        projector_mapping_layout = QtWidgets.QVBoxLayout(self.zone_projector_mapping_group)
+
+        # Projector selection
+        projector_selection_layout = QtWidgets.QHBoxLayout()
+        projector_selection_layout.addWidget(QtWidgets.QLabel("Projector:"))
+        self.zone_projector_combo = QtWidgets.QComboBox()
+        self.zone_projector_combo.currentTextChanged.connect(self._on_zone_projector_changed)
+        projector_selection_layout.addWidget(self.zone_projector_combo)
+        projector_mapping_layout.addLayout(projector_selection_layout)
+
+        # Vertices
+        projector_vertices_form = QtWidgets.QFormLayout()
+
+        # P0: Cyan
+        proj_p0_layout = QtWidgets.QHBoxLayout()
+        self.zone_projector_p0_x = QtWidgets.QSpinBox()
+        self.zone_projector_p0_x.setRange(0, 99999)
+        self.zone_projector_p0_x.setValue(128)
+        self.zone_projector_p0_x.valueChanged.connect(self._on_zone_projector_vertex_changed)
+        proj_p0_layout.addWidget(self.zone_projector_p0_x)
+        self.zone_projector_p0_y = QtWidgets.QSpinBox()
+        self.zone_projector_p0_y.setRange(0, 99999)
+        self.zone_projector_p0_y.setValue(128)
+        self.zone_projector_p0_y.valueChanged.connect(self._on_zone_projector_vertex_changed)
+        proj_p0_layout.addWidget(self.zone_projector_p0_y)
+        projector_vertices_form.addRow("P0 (Cyan):", proj_p0_layout)
+
+        # P1: Magenta
+        proj_p1_layout = QtWidgets.QHBoxLayout()
+        self.zone_projector_p1_x = QtWidgets.QSpinBox()
+        self.zone_projector_p1_x.setRange(0, 99999)
+        self.zone_projector_p1_x.setValue(384)
+        self.zone_projector_p1_x.valueChanged.connect(self._on_zone_projector_vertex_changed)
+        proj_p1_layout.addWidget(self.zone_projector_p1_x)
+        self.zone_projector_p1_y = QtWidgets.QSpinBox()
+        self.zone_projector_p1_y.setRange(0, 99999)
+        self.zone_projector_p1_y.setValue(128)
+        self.zone_projector_p1_y.valueChanged.connect(self._on_zone_projector_vertex_changed)
+        proj_p1_layout.addWidget(self.zone_projector_p1_y)
+        projector_vertices_form.addRow("P1 (Magenta):", proj_p1_layout)
+
+        # P2: Yellow
+        proj_p2_layout = QtWidgets.QHBoxLayout()
+        self.zone_projector_p2_x = QtWidgets.QSpinBox()
+        self.zone_projector_p2_x.setRange(0, 99999)
+        self.zone_projector_p2_x.setValue(384)
+        self.zone_projector_p2_x.valueChanged.connect(self._on_zone_projector_vertex_changed)
+        proj_p2_layout.addWidget(self.zone_projector_p2_x)
+        self.zone_projector_p2_y = QtWidgets.QSpinBox()
+        self.zone_projector_p2_y.setRange(0, 99999)
+        self.zone_projector_p2_y.setValue(256)
+        self.zone_projector_p2_y.valueChanged.connect(self._on_zone_projector_vertex_changed)
+        proj_p2_layout.addWidget(self.zone_projector_p2_y)
+        projector_vertices_form.addRow("P2 (Yellow):", proj_p2_layout)
+
+        # P3: White
+        proj_p3_layout = QtWidgets.QHBoxLayout()
+        self.zone_projector_p3_x = QtWidgets.QSpinBox()
+        self.zone_projector_p3_x.setRange(0, 99999)
+        self.zone_projector_p3_x.setValue(128)
+        self.zone_projector_p3_x.valueChanged.connect(self._on_zone_projector_vertex_changed)
+        proj_p3_layout.addWidget(self.zone_projector_p3_x)
+        self.zone_projector_p3_y = QtWidgets.QSpinBox()
+        self.zone_projector_p3_y.setRange(0, 99999)
+        self.zone_projector_p3_y.setValue(256)
+        self.zone_projector_p3_y.valueChanged.connect(self._on_zone_projector_vertex_changed)
+        proj_p3_layout.addWidget(self.zone_projector_p3_y)
+        projector_vertices_form.addRow("P3 (White):", proj_p3_layout)
+
+        projector_mapping_layout.addLayout(projector_vertices_form)
+
+        # Lock vertices checkbox
+        self.zone_projector_lock_vertices_checkbox = QtWidgets.QCheckBox("Lock vertices")
+        self.zone_projector_lock_vertices_checkbox.stateChanged.connect(self._on_zone_projector_lock_vertices_changed)
+        projector_mapping_layout.addWidget(self.zone_projector_lock_vertices_checkbox)
+
+        projector_layout.addWidget(self.zone_projector_mapping_group)
+        projector_layout.addStretch()
+        # Store reference to the projector layout for spacer management
+        self.projector_section_layout = projector_layout
+        main_layout.addWidget(self.projector_section)
+
+        # Initially hide mapping groups
+        self.zone_camera_mapping_group.setVisible(False)
+        self.zone_projector_mapping_group.setVisible(False)
+
+        # Create message label for when no zone or multiple zones selected
+        self.zone_settings_message_label = QtWidgets.QLabel(
+            "Please select one and only one Zone to enable modifications."
+        )
+        self.zone_settings_message_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop)
+        self.zone_settings_message_label.setStyleSheet("font-size: 14px; color: gray;")
+
+        # Add message label to main layout with stretch to keep it left-aligned
+        message_container = QtWidgets.QHBoxLayout()
+        message_container.addWidget(self.zone_settings_message_label)
+        message_container.addStretch()
+        main_layout.addLayout(message_container)
+        self.zone_settings_message_label.setVisible(False)
+
+        return widget
+
+    def _set_section_spacer_visible(self, layout: QtWidgets.QVBoxLayout, visible: bool) -> None:
+        """Show or hide the stretch spacer in a section layout.
+
+        Args:
+            layout: The layout containing the spacer.
+            visible: True to show spacer (expand), False to hide spacer (fixed size).
+        """
+        if not layout or not hasattr(self, 'camera_section_layout'):
+            return
+
+        # Get the last item in the layout (which should be the spacer)
+        item_count = layout.count()
+        if item_count > 0:
+            spacer_item = layout.itemAt(item_count - 1)
+            if spacer_item and spacer_item.spacerItem():
+                if visible:
+                    spacer_item.changeSize(0, 0, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
+                else:
+                    spacer_item.changeSize(0, 0, QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
+                layout.invalidate()
+
+    def _set_zone_settings_visible(self, visible: bool) -> None:
+        """Show or hide zone settings controls.
+
+        Args:
+            visible: True to show zone settings, False to show message.
+        """
+        # Show/hide the message label
+        self.zone_settings_message_label.setVisible(not visible)
+
+        # Show/hide all zone settings controls
+        self.zone_name_label.parent().setVisible(visible)
+        self.zone_camera_enabled_checkbox.parent().setVisible(visible)
+        self.zone_projector_enabled_checkbox.parent().setVisible(visible)
+
+        # Hide mapping sections when no zone is selected
+        if not visible:
+            self.camera_section.setVisible(False)
+            self.projector_section.setVisible(False)
+
+    def _load_zone_into_ui(self, zone) -> None:
+        """Load zone data into the UI controls.
+
+        Args:
+            zone: Zone object to load.
+        """
+        # Block signals to prevent triggering change handlers
+        self.zone_name_label.setText(zone.name)
+
+        self.zone_width_spinbox.blockSignals(True)
+        self.zone_width_spinbox.setValue(zone.width)
+        self.zone_width_spinbox.blockSignals(False)
+
+        self.zone_height_spinbox.blockSignals(True)
+        self.zone_height_spinbox.setValue(zone.height)
+        self.zone_height_spinbox.blockSignals(False)
+
+        self.zone_unit_combo.blockSignals(True)
+        self.zone_unit_combo.setCurrentText(zone.unit)
+        self.zone_unit_combo.blockSignals(False)
+
+        self.zone_resolution_spinbox.blockSignals(True)
+        self.zone_resolution_spinbox.setValue(zone.resolution)
+        self.zone_resolution_spinbox.setEnabled(zone.unit != 'px')
+        self.zone_resolution_spinbox.blockSignals(False)
+
+        # Load camera mapping
+        self.zone_camera_enabled_checkbox.blockSignals(True)
+        if zone.camera_mapping:
+            self.zone_camera_enabled_checkbox.setChecked(True)
+            self.camera_section.setVisible(True)
+            self.zone_camera_mapping_group.setVisible(True)
+
+            self._update_camera_combo()
+            self.zone_camera_combo.blockSignals(True)
+            self.zone_camera_combo.setCurrentText(zone.camera_mapping.camera_name)
+            self.zone_camera_combo.blockSignals(False)
+
+            vertices = zone.camera_mapping.vertices
+            self.zone_camera_p0_x.blockSignals(True)
+            self.zone_camera_p0_y.blockSignals(True)
+            self.zone_camera_p1_x.blockSignals(True)
+            self.zone_camera_p1_y.blockSignals(True)
+            self.zone_camera_p2_x.blockSignals(True)
+            self.zone_camera_p2_y.blockSignals(True)
+            self.zone_camera_p3_x.blockSignals(True)
+            self.zone_camera_p3_y.blockSignals(True)
+
+            self.zone_camera_p0_x.setValue(vertices[0][0])
+            self.zone_camera_p0_y.setValue(vertices[0][1])
+            self.zone_camera_p1_x.setValue(vertices[1][0])
+            self.zone_camera_p1_y.setValue(vertices[1][1])
+            self.zone_camera_p2_x.setValue(vertices[2][0])
+            self.zone_camera_p2_y.setValue(vertices[2][1])
+            self.zone_camera_p3_x.setValue(vertices[3][0])
+            self.zone_camera_p3_y.setValue(vertices[3][1])
+
+            self.zone_camera_p0_x.blockSignals(False)
+            self.zone_camera_p0_y.blockSignals(False)
+            self.zone_camera_p1_x.blockSignals(False)
+            self.zone_camera_p1_y.blockSignals(False)
+            self.zone_camera_p2_x.blockSignals(False)
+            self.zone_camera_p2_y.blockSignals(False)
+            self.zone_camera_p3_x.blockSignals(False)
+            self.zone_camera_p3_y.blockSignals(False)
+
+            # Load camera lock vertices from mapping
+            self.zone_camera_lock_vertices_checkbox.blockSignals(True)
+            self.zone_camera_lock_vertices_checkbox.setChecked(zone.camera_mapping.lock_vertices)
+            self.zone_camera_lock_vertices_checkbox.blockSignals(False)
+            self._update_camera_vertices_enabled()
+        else:
+            self.zone_camera_enabled_checkbox.setChecked(False)
+            self.camera_section.setVisible(False)
+
+        self.zone_camera_enabled_checkbox.blockSignals(False)
+
+        # Load projector mapping
+        self.zone_projector_enabled_checkbox.blockSignals(True)
+        if zone.projector_mapping:
+            self.zone_projector_enabled_checkbox.setChecked(True)
+            self.projector_section.setVisible(True)
+            self.zone_projector_mapping_group.setVisible(True)
+
+            self._update_projector_combo()
+            self.zone_projector_combo.blockSignals(True)
+            self.zone_projector_combo.setCurrentText(zone.projector_mapping.projector_name)
+            self.zone_projector_combo.blockSignals(False)
+
+            vertices = zone.projector_mapping.vertices
+            self.zone_projector_p0_x.blockSignals(True)
+            self.zone_projector_p0_y.blockSignals(True)
+            self.zone_projector_p1_x.blockSignals(True)
+            self.zone_projector_p1_y.blockSignals(True)
+            self.zone_projector_p2_x.blockSignals(True)
+            self.zone_projector_p2_y.blockSignals(True)
+            self.zone_projector_p3_x.blockSignals(True)
+            self.zone_projector_p3_y.blockSignals(True)
+
+            self.zone_projector_p0_x.setValue(vertices[0][0])
+            self.zone_projector_p0_y.setValue(vertices[0][1])
+            self.zone_projector_p1_x.setValue(vertices[1][0])
+            self.zone_projector_p1_y.setValue(vertices[1][1])
+            self.zone_projector_p2_x.setValue(vertices[2][0])
+            self.zone_projector_p2_y.setValue(vertices[2][1])
+            self.zone_projector_p3_x.setValue(vertices[3][0])
+            self.zone_projector_p3_y.setValue(vertices[3][1])
+
+            self.zone_projector_p0_x.blockSignals(False)
+            self.zone_projector_p0_y.blockSignals(False)
+            self.zone_projector_p1_x.blockSignals(False)
+            self.zone_projector_p1_y.blockSignals(False)
+            self.zone_projector_p2_x.blockSignals(False)
+            self.zone_projector_p2_y.blockSignals(False)
+            self.zone_projector_p3_x.blockSignals(False)
+            self.zone_projector_p3_y.blockSignals(False)
+
+            # Load projector lock vertices from mapping
+            self.zone_projector_lock_vertices_checkbox.blockSignals(True)
+            self.zone_projector_lock_vertices_checkbox.setChecked(zone.projector_mapping.lock_vertices)
+            self.zone_projector_lock_vertices_checkbox.blockSignals(False)
+            self._update_projector_vertices_enabled()
+        else:
+            self.zone_projector_enabled_checkbox.setChecked(False)
+            self.projector_section.setVisible(False)
+
+        self.zone_projector_enabled_checkbox.blockSignals(False)
+
+        # Load draw locked borders from zone (applies to both mappings)
+        self.zone_draw_locked_borders_checkbox.blockSignals(True)
+        self.zone_draw_locked_borders_checkbox.setChecked(zone.draw_locked_borders)
+        self.zone_draw_locked_borders_checkbox.blockSignals(False)
+
+    def _update_camera_combo(self) -> None:
+        """Update camera combo box with available cameras."""
+        current = self.zone_camera_combo.currentText()
+        self.zone_camera_combo.clear()
+
+        camera_names = self.core.camera_manager.get_camera_names()
+        for camera_name in camera_names:
+            self.zone_camera_combo.addItem(camera_name)
+
+        # Restore selection if still valid
+        if current:
+            index = self.zone_camera_combo.findText(current)
+            if index >= 0:
+                self.zone_camera_combo.setCurrentIndex(index)
+
+    def _update_projector_combo(self) -> None:
+        """Update projector combo box with available projectors."""
+        current = self.zone_projector_combo.currentText()
+        self.zone_projector_combo.clear()
+
+        projectors = self.core.projector_manager.get_all_projectors()
+        for projector in projectors:
+            self.zone_projector_combo.addItem(projector.name)
+
+        # Restore selection if still valid
+        if current:
+            index = self.zone_projector_combo.findText(current)
+            if index >= 0:
+                self.zone_projector_combo.setCurrentIndex(index)
+
+    def _update_camera_vertices_enabled(self) -> None:
+        """Enable/disable camera vertex spinboxes based on lock state."""
+        locked = self.zone_camera_lock_vertices_checkbox.isChecked()
+        self.zone_camera_p0_x.setEnabled(not locked)
+        self.zone_camera_p0_y.setEnabled(not locked)
+        self.zone_camera_p1_x.setEnabled(not locked)
+        self.zone_camera_p1_y.setEnabled(not locked)
+        self.zone_camera_p2_x.setEnabled(not locked)
+        self.zone_camera_p2_y.setEnabled(not locked)
+        self.zone_camera_p3_x.setEnabled(not locked)
+        self.zone_camera_p3_y.setEnabled(not locked)
+
+    def _update_projector_vertices_enabled(self) -> None:
+        """Enable/disable projector vertex spinboxes based on lock state."""
+        locked = self.zone_projector_lock_vertices_checkbox.isChecked()
+        self.zone_projector_p0_x.setEnabled(not locked)
+        self.zone_projector_p0_y.setEnabled(not locked)
+        self.zone_projector_p1_x.setEnabled(not locked)
+        self.zone_projector_p1_y.setEnabled(not locked)
+        self.zone_projector_p2_x.setEnabled(not locked)
+        self.zone_projector_p2_y.setEnabled(not locked)
+        self.zone_projector_p3_x.setEnabled(not locked)
+        self.zone_projector_p3_y.setEnabled(not locked)
+
+    def _get_selected_zone(self):
+        """Get the currently selected zone if exactly one is selected."""
+        selected_items = self.zone_list.selectedItems()
+        if len(selected_items) == 1:
+            zone_name = selected_items[0].text()
+            try:
+                return self.core.zone_manager.get_zone(zone_name)
+            except KeyError:
+                return None
+        return None
+
+    @QtCore.Slot(float)
+    def _on_zone_width_changed(self, value: float) -> None:
+        """Handle zone width change."""
+        zone = self._get_selected_zone()
+        if zone:
+            zone.width = value
+
+    @QtCore.Slot(float)
+    def _on_zone_height_changed(self, value: float) -> None:
+        """Handle zone height change."""
+        zone = self._get_selected_zone()
+        if zone:
+            zone.height = value
+
+    @QtCore.Slot(str)
+    def _on_zone_unit_changed(self, unit: str) -> None:
+        """Handle zone unit change."""
+        zone = self._get_selected_zone()
+        if zone:
+            zone.unit = unit
+            # Disable resolution spinbox if unit is pixels
+            self.zone_resolution_spinbox.setEnabled(unit != 'px')
+            if unit == 'px':
+                zone.resolution = 1
+                self.zone_resolution_spinbox.blockSignals(True)
+                self.zone_resolution_spinbox.setValue(1)
+                self.zone_resolution_spinbox.blockSignals(False)
+
+    @QtCore.Slot(int)
+    def _on_zone_resolution_changed(self, value: int) -> None:
+        """Handle zone resolution change."""
+        zone = self._get_selected_zone()
+        if zone:
+            zone.resolution = value
+
+    @QtCore.Slot(int)
+    def _on_zone_camera_enabled_changed(self, state: int) -> None:
+        """Handle camera mapping enable/disable."""
+        from .zone import CameraMapping
+
+        zone = self._get_selected_zone()
+        if not zone:
+            return
+
+        enabled = state == QtCore.Qt.CheckState.Checked.value
+        self.camera_section.setVisible(enabled)
+
+        if enabled:
+            # Refresh combo box with available cameras
+            self._update_camera_combo()
+
+            if not zone.camera_mapping:
+                # Create new camera mapping with default values
+                camera_name = self.zone_camera_combo.currentText() if self.zone_camera_combo.count() > 0 else ""
+                if camera_name:
+                    zone.camera_mapping = CameraMapping(camera_name=camera_name)
+        elif not enabled:
+            zone.camera_mapping = None
+
+    @QtCore.Slot(str)
+    def _on_zone_camera_changed(self, camera_name: str) -> None:
+        """Handle camera selection change."""
+        zone = self._get_selected_zone()
+        if zone and zone.camera_mapping and camera_name:
+            zone.camera_mapping.camera_name = camera_name
+
+    @QtCore.Slot()
+    def _on_zone_camera_vertex_changed(self) -> None:
+        """Handle camera vertex coordinate change."""
+        zone = self._get_selected_zone()
+        if zone and zone.camera_mapping:
+            zone.camera_mapping.vertices = [
+                (self.zone_camera_p0_x.value(), self.zone_camera_p0_y.value()),
+                (self.zone_camera_p1_x.value(), self.zone_camera_p1_y.value()),
+                (self.zone_camera_p2_x.value(), self.zone_camera_p2_y.value()),
+                (self.zone_camera_p3_x.value(), self.zone_camera_p3_y.value())
+            ]
+
+    @QtCore.Slot(int)
+    def _on_zone_draw_locked_borders_changed(self, state: int) -> None:
+        """Handle draw locked borders checkbox change (applies to both camera and projector)."""
+        zone = self._get_selected_zone()
+        if zone:
+            zone.draw_locked_borders = state == QtCore.Qt.CheckState.Checked.value
+
+    @QtCore.Slot(int)
+    def _on_zone_camera_lock_vertices_changed(self, state: int) -> None:
+        """Handle camera lock vertices checkbox change."""
+        zone = self._get_selected_zone()
+        if zone and zone.camera_mapping:
+            zone.camera_mapping.lock_vertices = state == QtCore.Qt.CheckState.Checked.value
+            self._update_camera_vertices_enabled()
+
+    @QtCore.Slot(int)
+    def _on_zone_projector_enabled_changed(self, state: int) -> None:
+        """Handle projector mapping enable/disable."""
+        from .zone import ProjectorMapping
+
+        zone = self._get_selected_zone()
+        if not zone:
+            return
+
+        enabled = state == QtCore.Qt.CheckState.Checked.value
+        self.projector_section.setVisible(enabled)
+
+        if enabled:
+            # Refresh combo box with available projectors
+            self._update_projector_combo()
+
+            if not zone.projector_mapping:
+                # Create new projector mapping with default values
+                projector_name = self.zone_projector_combo.currentText() if self.zone_projector_combo.count() > 0 else ""
+                if projector_name:
+                    zone.projector_mapping = ProjectorMapping(projector_name=projector_name)
+        elif not enabled:
+            zone.projector_mapping = None
+
+    @QtCore.Slot(str)
+    def _on_zone_projector_changed(self, projector_name: str) -> None:
+        """Handle projector selection change."""
+        zone = self._get_selected_zone()
+        if zone and zone.projector_mapping and projector_name:
+            zone.projector_mapping.projector_name = projector_name
+
+    @QtCore.Slot()
+    def _on_zone_projector_vertex_changed(self) -> None:
+        """Handle projector vertex coordinate change."""
+        zone = self._get_selected_zone()
+        if zone and zone.projector_mapping:
+            zone.projector_mapping.vertices = [
+                (self.zone_projector_p0_x.value(), self.zone_projector_p0_y.value()),
+                (self.zone_projector_p1_x.value(), self.zone_projector_p1_y.value()),
+                (self.zone_projector_p2_x.value(), self.zone_projector_p2_y.value()),
+                (self.zone_projector_p3_x.value(), self.zone_projector_p3_y.value())
+            ]
+
+    @QtCore.Slot(int)
+    def _on_zone_projector_lock_vertices_changed(self, state: int) -> None:
+        """Handle projector lock vertices checkbox change."""
+        zone = self._get_selected_zone()
+        if zone and zone.projector_mapping:
+            zone.projector_mapping.lock_vertices = state == QtCore.Qt.CheckState.Checked.value
+            self._update_projector_vertices_enabled()
+
     def _create_camera_tabs(self) -> QtWidgets.QTabWidget:
         """Create the camera tab widget.
 
@@ -264,7 +969,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Settings tab
         settings_widget = self._create_camera_settings_widget()
-        tabs.addTab(settings_widget, "Settings")
+        tabs.addTab(settings_widget, "Camera Settings")
 
         # Calibration tab
         calibration_widget = self._create_camera_calibration_widget()
@@ -722,6 +1427,30 @@ class MainWindow(QtWidgets.QMainWindow):
         # Get camera names
         camera_names = [item.text() for item in selected_items]
 
+        # Check if any cameras are used by zones
+        cameras_in_use = {}
+        for camera_name in camera_names:
+            zones_using_camera = []
+            for zone in self.core.zone_manager.get_all_zones():
+                if zone.camera_mapping and zone.camera_mapping.camera_name == camera_name:
+                    zones_using_camera.append(zone.name)
+            if zones_using_camera:
+                cameras_in_use[camera_name] = zones_using_camera
+
+        # If any cameras are in use, show error and abort
+        if cameras_in_use:
+            message = "Cannot delete the following camera(s) because they are in use by zones:\n\n"
+            for camera_name, zone_names in cameras_in_use.items():
+                message += f"  • {camera_name} is used by: {', '.join(zone_names)}\n"
+            message += "\nPlease remove or modify the zone mappings first."
+
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Cameras In Use",
+                message
+            )
+            return
+
         # Confirm deletion
         if len(camera_names) == 1:
             message = f"Are you sure you want to delete camera '{camera_names[0]}'?"
@@ -814,8 +1543,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if file_path:
             try:
+                # Wrap data in standard structure
+                save_data = {
+                    "type": "cameras",
+                    "version": "1.0",
+                    "data": cameras_data
+                }
+
                 with open(file_path, 'w') as f:
-                    json.dump(cameras_data, f, indent=2)
+                    json.dump(save_data, f, indent=2)
 
                 QtWidgets.QMessageBox.information(
                     self,
@@ -849,7 +1585,59 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             # Load JSON file
             with open(file_path, 'r') as f:
-                cameras_data = json.load(f)
+                file_data = json.load(f)
+
+            # Validate file structure
+            if not isinstance(file_data, dict):
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid File Format",
+                    "The file format is invalid. Expected a JSON object with 'type', 'version', and 'data' fields."
+                )
+                return
+
+            # Validate type field
+            if 'type' not in file_data:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Missing Type Field",
+                    "The file is missing the required 'type' field."
+                )
+                return
+
+            # Accept both 'cameras' and 'master' file types
+            if file_data['type'] not in ['cameras', 'master']:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid File Type",
+                    f"Cannot load cameras from a '{file_data['type']}' file.\n"
+                    f"Please select a cameras or master configuration file."
+                )
+                return
+
+            # Validate version field
+            if 'version' not in file_data:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Missing Version Field",
+                    "The file is missing the required 'version' field."
+                )
+                return
+
+            if file_data['version'] != '1.0':
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Unknown Version",
+                    f"Unknown file version '{file_data['version']}'. This application only supports version '1.0'."
+                )
+                return
+
+            # Extract cameras data based on file type
+            if file_data['type'] == 'master':
+                master_data = file_data.get('data', {})
+                cameras_data = master_data.get('cameras', [])
+            else:
+                cameras_data = file_data.get('data', [])
 
             if not cameras_data:
                 QtWidgets.QMessageBox.information(
@@ -1041,6 +1829,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if items:
             self.camera_list.setCurrentItem(items[0])
 
+        # Enable save button since we have at least one camera
+        self.save_camera_button.setEnabled(True)
+
     @QtCore.Slot(str)
     def _on_camera_removed(self, camera_name: str) -> None:
         """Handle camera removed signal.
@@ -1053,6 +1844,9 @@ class MainWindow(QtWidgets.QMainWindow):
         for item in items:
             row = self.camera_list.row(item)
             self.camera_list.takeItem(row)
+
+        # Disable save button if no cameras left
+        self.save_camera_button.setEnabled(self.camera_list.count() > 0)
 
     @QtCore.Slot(str)
     def _on_projector_added(self, projector_name: str) -> None:
@@ -1075,6 +1869,9 @@ class MainWindow(QtWidgets.QMainWindow):
         projector.dialog = dialog
         dialog.show()
 
+        # Enable save button since we have at least one projector
+        self.save_projector_button.setEnabled(True)
+
     @QtCore.Slot(str)
     def _on_projector_removed(self, projector_name: str) -> None:
         """Handle projector removed signal.
@@ -1087,6 +1884,9 @@ class MainWindow(QtWidgets.QMainWindow):
         for item in items:
             row = self.projector_list.row(item)
             self.projector_list.takeItem(row)
+
+        # Disable save button if no projectors left
+        self.save_projector_button.setEnabled(self.projector_list.count() > 0)
 
     @QtCore.Slot()
     def _on_projector_selection_changed(self) -> None:
@@ -1155,6 +1955,30 @@ class MainWindow(QtWidgets.QMainWindow):
 
         projector_names = [item.text() for item in selected_items]
 
+        # Check if any projectors are used by zones
+        projectors_in_use = {}
+        for projector_name in projector_names:
+            zones_using_projector = []
+            for zone in self.core.zone_manager.get_all_zones():
+                if zone.projector_mapping and zone.projector_mapping.projector_name == projector_name:
+                    zones_using_projector.append(zone.name)
+            if zones_using_projector:
+                projectors_in_use[projector_name] = zones_using_projector
+
+        # If any projectors are in use, show error and abort
+        if projectors_in_use:
+            message = "Cannot delete the following projector(s) because they are in use by zones:\n\n"
+            for projector_name, zone_names in projectors_in_use.items():
+                message += f"  • {projector_name} is used by: {', '.join(zone_names)}\n"
+            message += "\nPlease remove or modify the zone mappings first."
+
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Projectors In Use",
+                message
+            )
+            return
+
         # Confirm deletion
         if len(projector_names) == 1:
             message = f"Are you sure you want to delete projector '{projector_names[0]}'?"
@@ -1214,8 +2038,15 @@ class MainWindow(QtWidgets.QMainWindow):
             try:
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
+                # Wrap data in standard structure
+                save_data = {
+                    "type": "projectors",
+                    "version": "1.0",
+                    "data": projectors_data
+                }
+
                 with open(file_path, 'w') as f:
-                    json.dump(projectors_data, f, indent=2)
+                    json.dump(save_data, f, indent=2)
 
                 QtWidgets.QMessageBox.information(
                     self,
@@ -1253,7 +2084,59 @@ class MainWindow(QtWidgets.QMainWindow):
 
         try:
             with open(file_path, 'r') as f:
-                projectors_data = json.load(f)
+                file_data = json.load(f)
+
+            # Validate file structure
+            if not isinstance(file_data, dict):
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid File Format",
+                    "The file format is invalid. Expected a JSON object with 'type', 'version', and 'data' fields."
+                )
+                return
+
+            # Validate type field
+            if 'type' not in file_data:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Missing Type Field",
+                    "The file is missing the required 'type' field."
+                )
+                return
+
+            # Accept both 'projectors' and 'master' file types
+            if file_data['type'] not in ['projectors', 'master']:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid File Type",
+                    f"Cannot load projectors from a '{file_data['type']}' file.\n"
+                    f"Please select a projectors or master configuration file."
+                )
+                return
+
+            # Validate version field
+            if 'version' not in file_data:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Missing Version Field",
+                    "The file is missing the required 'version' field."
+                )
+                return
+
+            if file_data['version'] != '1.0':
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Unknown Version",
+                    f"Unknown file version '{file_data['version']}'. This application only supports version '1.0'."
+                )
+                return
+
+            # Extract projectors data based on file type
+            if file_data['type'] == 'master':
+                master_data = file_data.get('data', {})
+                projectors_data = master_data.get('projectors', [])
+            else:
+                projectors_data = file_data.get('data', [])
 
             if not projectors_data:
                 QtWidgets.QMessageBox.information(
@@ -1326,6 +2209,684 @@ class MainWindow(QtWidgets.QMainWindow):
                 self,
                 "Error Loading Projectors",
                 f"Failed to load projectors: {str(e)}"
+            )
+
+    @QtCore.Slot(str)
+    def _on_zone_added(self, zone_name: str) -> None:
+        """Handle zone added signal.
+
+        Args:
+            zone_name: Name of the added zone.
+        """
+        # Add to list widget
+        item = QtWidgets.QListWidgetItem(zone_name)
+        self.zone_list.addItem(item)
+
+        # Enable save button since we have at least one zone
+        self.save_zone_button.setEnabled(True)
+
+    @QtCore.Slot(str)
+    def _on_zone_removed(self, zone_name: str) -> None:
+        """Handle zone removed signal.
+
+        Args:
+            zone_name: Name of the removed zone.
+        """
+        # Remove from list widget
+        items = self.zone_list.findItems(zone_name, QtCore.Qt.MatchFlag.MatchExactly)
+        for item in items:
+            row = self.zone_list.row(item)
+            self.zone_list.takeItem(row)
+
+        # Disable save button if no zones left
+        self.save_zone_button.setEnabled(self.zone_list.count() > 0)
+
+    @QtCore.Slot()
+    def _on_zone_selection_changed(self) -> None:
+        """Handle zone list selection change."""
+        selected_items = self.zone_list.selectedItems()
+        has_selection = len(selected_items) > 0
+
+        # Enable delete button only if at least one zone is selected
+        self.delete_zone_button.setEnabled(has_selection)
+
+        # Show zone settings only if exactly one zone is selected
+        if len(selected_items) == 1:
+            zone_name = selected_items[0].text()
+            try:
+                zone = self.core.zone_manager.get_zone(zone_name)
+                self._load_zone_into_ui(zone)
+                self._set_zone_settings_visible(True)
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Error Loading Zone",
+                    f"Failed to load zone '{zone_name}': {str(e)}"
+                )
+                self._set_zone_settings_visible(False)
+        else:
+            self._set_zone_settings_visible(False)
+
+    @QtCore.Slot()
+    def _on_add_zone(self) -> None:
+        """Handle add zone button click."""
+        from .zone import Zone
+        from .add_zone_dialog import AddZoneDialog
+
+        # Show dialog to get zone name
+        dialog = AddZoneDialog(self.core.zone_manager, self)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            zone_name = dialog.get_zone_name()
+
+            try:
+                # Create and add zone with default values
+                zone = Zone(zone_name)
+                self.core.zone_manager.add_zone(zone)
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Error Adding Zone",
+                    f"Failed to add zone: {str(e)}"
+                )
+
+    @QtCore.Slot()
+    def _on_delete_zone(self) -> None:
+        """Handle delete zone button click."""
+        selected_items = self.zone_list.selectedItems()
+        if not selected_items:
+            return
+
+        zone_names = [item.text() for item in selected_items]
+
+        # Confirm deletion
+        if len(zone_names) == 1:
+            message = f"Are you sure you want to delete zone '{zone_names[0]}'?"
+        else:
+            message = f"Are you sure you want to delete {len(zone_names)} zones?"
+
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Delete Zone(s)",
+            message,
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No
+        )
+
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            # Remove zones
+            for zone_name in zone_names:
+                try:
+                    self.core.zone_manager.remove_zone(zone_name)
+                except Exception as e:
+                    QtWidgets.QMessageBox.critical(
+                        self,
+                        "Error Deleting Zone",
+                        f"Failed to delete zone '{zone_name}': {str(e)}"
+                    )
+
+    @QtCore.Slot()
+    def _on_save_zone(self) -> None:
+        """Handle save zone button click."""
+        import json
+        import os
+        from . import constants
+
+        # Get all zones data
+        zones_data = self.core.zone_manager.serialize_zones()
+
+        if not zones_data:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No Zones",
+                "No zones to save."
+            )
+            return
+
+        # Ensure saved zones directory exists
+        os.makedirs(constants.SAVED_ZONES_DIR_PATH, exist_ok=True)
+
+        # Show file save dialog
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save Zones",
+            constants.SAVED_ZONES_DIR_PATH,
+            "JSON Files (*.json)"
+        )
+
+        if file_path:
+            try:
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+                # Wrap data in standard structure
+                save_data = {
+                    "type": "zones",
+                    "version": "1.0",
+                    "data": zones_data
+                }
+
+                with open(file_path, 'w') as f:
+                    json.dump(save_data, f, indent=2)
+
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Zones Saved",
+                    f"Successfully saved {len(zones_data)} zone(s)."
+                )
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Error Saving Zones",
+                    f"Failed to save zones: {str(e)}"
+                )
+
+    @QtCore.Slot()
+    def _on_load_zone(self) -> None:
+        """Handle load zone button click."""
+        import json
+        import os
+        from . import constants
+        from .zone import Zone
+
+        # Ensure saved zones directory exists
+        os.makedirs(constants.SAVED_ZONES_DIR_PATH, exist_ok=True)
+
+        # Show file open dialog
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Load Zones",
+            constants.SAVED_ZONES_DIR_PATH,
+            "JSON Files (*.json)"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, 'r') as f:
+                file_data = json.load(f)
+
+            # Validate file structure
+            if not isinstance(file_data, dict):
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid File Format",
+                    "The file format is invalid. Expected a JSON object with 'type', 'version', and 'data' fields."
+                )
+                return
+
+            # Validate type field
+            if 'type' not in file_data:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Missing Type Field",
+                    "The file is missing the required 'type' field."
+                )
+                return
+
+            # Accept both 'zones' and 'master' file types
+            if file_data['type'] not in ['zones', 'master']:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid File Type",
+                    f"Cannot load zones from a '{file_data['type']}' file.\n"
+                    f"Please select a zones or master configuration file."
+                )
+                return
+
+            # Validate version field
+            if 'version' not in file_data:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Missing Version Field",
+                    "The file is missing the required 'version' field."
+                )
+                return
+
+            if file_data['version'] != '1.0':
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Unknown Version",
+                    f"Unknown file version '{file_data['version']}'. This application only supports version '1.0'."
+                )
+                return
+
+            # Extract zones data based on file type
+            if file_data['type'] == 'master':
+                master_data = file_data.get('data', {})
+                zones_data = master_data.get('zones', [])
+            else:
+                zones_data = file_data.get('data', [])
+
+            if not zones_data:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "No Zones",
+                    "No zones found in file."
+                )
+                return
+
+            # Check for conflicts
+            conflicts = []
+            for zone_data in zones_data:
+                if self.core.zone_manager.zone_exists(zone_data['name']):
+                    conflicts.append(zone_data['name'])
+
+            # Ask user if they want to replace conflicting zones
+            if conflicts:
+                message = "The following zones already exist:\n\n"
+                message += "\n".join(conflicts)
+                message += "\n\nDo you want to replace them?"
+
+                reply = QtWidgets.QMessageBox.question(
+                    self,
+                    "Replace Zones?",
+                    message,
+                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                    QtWidgets.QMessageBox.StandardButton.No
+                )
+
+                if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return
+
+                # Remove conflicting zones
+                for conflict_name in conflicts:
+                    try:
+                        self.core.zone_manager.remove_zone(conflict_name)
+                    except Exception as e:
+                        QtWidgets.QMessageBox.warning(
+                            self,
+                            "Error Removing Zone",
+                            f"Failed to remove zone '{conflict_name}': {str(e)}"
+                        )
+
+            # Load zones
+            loaded_count = 0
+            for zone_data in zones_data:
+                try:
+                    zone = Zone.from_dict(zone_data)
+                    self.core.zone_manager.add_zone(zone)
+                    loaded_count += 1
+                except Exception as e:
+                    QtWidgets.QMessageBox.warning(
+                        self,
+                        "Error Loading Zone",
+                        f"Failed to load zone '{zone_data.get('name', 'Unknown')}': {str(e)}"
+                    )
+
+            if loaded_count > 0:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Zones Loaded",
+                    f"Successfully loaded {loaded_count} zone(s)."
+                )
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error Loading Zones",
+                f"Failed to load zones: {str(e)}"
+            )
+
+    @QtCore.Slot()
+    def _on_save_master_configuration(self) -> None:
+        """Handle save master configuration menu action."""
+        import json
+        import os
+        from . import constants
+
+        # Collect all data
+        cameras_data = []
+        projectors_data = []
+        zones_data = []
+
+        try:
+            # Get cameras data
+            for camera_name in self.core.camera_manager.get_camera_names():
+                camera = self.core.camera_manager.get_camera(camera_name)
+                camera_dict = {
+                    'name': camera.name,
+                    'backend': camera.get_backend(),
+                    'device_id': camera.get_device_id(),
+                    'camera_info': camera.get_camera_info(),
+                    'properties': {}
+                }
+
+                # Get all properties
+                for prop_id in [cv.CAP_PROP_FRAME_WIDTH, cv.CAP_PROP_FRAME_HEIGHT,
+                                cv.CAP_PROP_FPS, cv.CAP_PROP_FOURCC, cv.CAP_PROP_BRIGHTNESS,
+                                cv.CAP_PROP_CONTRAST, cv.CAP_PROP_SATURATION, cv.CAP_PROP_HUE,
+                                cv.CAP_PROP_GAIN, cv.CAP_PROP_EXPOSURE, cv.CAP_PROP_AUTO_EXPOSURE,
+                                cv.CAP_PROP_AUTOFOCUS, cv.CAP_PROP_FOCUS]:
+                    value = camera.get_property(prop_id)
+                    if value is not None:
+                        camera_dict['properties'][str(prop_id)] = value
+
+                # Add calibration data if available
+                if camera.calibration_data is not None:
+                    camera_dict['calibration_data'] = {
+                        'mtx': camera.calibration_data.mtx.tolist(),
+                        'dist': camera.calibration_data.dist.tolist(),
+                        'rvecs_list': [rvec.tolist() for rvec in camera.calibration_data.rvecs_list],
+                        'tvecs_list': [tvec.tolist() for tvec in camera.calibration_data.tvecs_list],
+                        'mean_reprojection_error': camera.calibration_data.mean_reprojection_error,
+                        'resolution': camera.calibration_data.resolution
+                    }
+
+                cameras_data.append(camera_dict)
+
+            # Get projectors data
+            projectors_data = self.core.projector_manager.serialize_projectors()
+
+            # Get zones data
+            zones_data = self.core.zone_manager.serialize_zones()
+
+            # Create master configuration dictionary with standard structure
+            master_config = {
+                'type': 'master',
+                'version': '1.0',
+                'data': {
+                    'cameras': cameras_data,
+                    'projectors': projectors_data,
+                    'zones': zones_data
+                }
+            }
+
+            # Ensure directory exists
+            os.makedirs(constants.SAVED_MASTER_CONFIGURATIONS_DIR_PATH, exist_ok=True)
+
+            # Show file save dialog
+            file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                "Save Master Configuration",
+                constants.SAVED_MASTER_CONFIGURATIONS_DIR_PATH,
+                "JSON Files (*.json)"
+            )
+
+            if file_path:
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+                with open(file_path, 'w') as f:
+                    json.dump(master_config, f, indent=2)
+
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Master Configuration Saved",
+                    f"Successfully saved configuration with {len(cameras_data)} camera(s), "
+                    f"{len(projectors_data)} projector(s), and {len(zones_data)} zone(s)."
+                )
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error Saving Master Configuration",
+                f"Failed to save master configuration: {str(e)}"
+            )
+
+    @QtCore.Slot()
+    def _on_load_master_configuration(self) -> None:
+        """Handle load master configuration menu action."""
+        import json
+        import os
+        from . import constants
+        from .zone import Zone
+
+        # Ensure directory exists
+        os.makedirs(constants.SAVED_MASTER_CONFIGURATIONS_DIR_PATH, exist_ok=True)
+
+        # Show file open dialog
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Load Master Configuration",
+            constants.SAVED_MASTER_CONFIGURATIONS_DIR_PATH,
+            "JSON Files (*.json)"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, 'r') as f:
+                file_data = json.load(f)
+
+            # Validate file structure
+            if not isinstance(file_data, dict):
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid File Format",
+                    "The file format is invalid. Expected a JSON object with 'type', 'version', and 'data' fields."
+                )
+                return
+
+            # Validate type field
+            if 'type' not in file_data:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Missing Type Field",
+                    "The file is missing the required 'type' field."
+                )
+                return
+
+            if file_data['type'] != 'master':
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid File Type",
+                    f"Cannot load master configuration from a '{file_data['type']}' file.\n"
+                    f"Please select a master configuration file."
+                )
+                return
+
+            # Validate version field
+            if 'version' not in file_data:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Missing Version Field",
+                    "The file is missing the required 'version' field."
+                )
+                return
+
+            if file_data['version'] != '1.0':
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Unknown Version",
+                    f"Unknown file version '{file_data['version']}'. This application only supports version '1.0'."
+                )
+                return
+
+            master_data = file_data.get('data', {})
+
+            cameras_data = master_data.get('cameras', [])
+            projectors_data = master_data.get('projectors', [])
+            zones_data = master_data.get('zones', [])
+
+            if not cameras_data and not projectors_data and not zones_data:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Empty Configuration",
+                    "The master configuration file is empty."
+                )
+                return
+
+            # Show confirmation dialog
+            message = "This will clear all existing cameras, projectors, and zones, then load:\n"
+            message += f"  - {len(cameras_data)} camera(s)\n"
+            message += f"  - {len(projectors_data)} projector(s)\n"
+            message += f"  - {len(zones_data)} zone(s)\n\n"
+            message += "Do you want to continue?"
+
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Load Master Configuration",
+                message,
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No
+            )
+
+            if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+
+            # Clear all existing items first
+            # Remove all zones
+            for zone in list(self.core.zone_manager.get_all_zones()):
+                try:
+                    self.core.zone_manager.remove_zone(zone.name)
+                except Exception:
+                    pass
+
+            # Remove all projectors
+            for projector in list(self.core.projector_manager.get_all_projectors()):
+                try:
+                    self.core.projector_manager.remove_projector(projector.name)
+                except Exception:
+                    pass
+
+            # Remove all cameras
+            for camera_name in list(self.core.camera_manager.get_camera_names()):
+                try:
+                    self.core.camera_manager.remove_camera(camera_name)
+                except Exception:
+                    pass
+
+            loaded_cameras = 0
+            loaded_projectors = 0
+            loaded_zones = 0
+
+            # Load cameras first
+            if cameras_data:
+                cameras_to_load = []
+                missing_cameras = []
+                used_device_ids = {}
+
+                for cam_data in cameras_data:
+                    backend = cam_data['backend']
+                    saved_device_id = cam_data['device_id']
+                    saved_camera_info = cam_data.get('camera_info')
+
+                    matched_device_id = self.core.camera_manager.find_matching_device(
+                        backend, saved_camera_info, saved_device_id
+                    )
+
+                    if matched_device_id is None:
+                        missing_cameras.append(cam_data['name'])
+                        continue
+
+                    if backend not in used_device_ids:
+                        used_device_ids[backend] = set()
+
+                    if matched_device_id in used_device_ids[backend]:
+                        missing_cameras.append(cam_data['name'])
+                        continue
+
+                    used_device_ids[backend].add(matched_device_id)
+
+                    cameras_to_load.append({
+                        'name': cam_data['name'],
+                        'backend': backend,
+                        'device_id': matched_device_id,
+                        'camera_info': saved_camera_info,
+                        'properties': cam_data.get('properties', {}),
+                        'calibration_data': cam_data.get('calibration_data')
+                    })
+
+                # Remove conflicting cameras
+                existing_cameras = self.core.camera_manager.get_camera_names()
+                for cam in cameras_to_load:
+                    if cam['name'] in existing_cameras:
+                        try:
+                            self.core.camera_manager.remove_camera(cam['name'])
+                        except Exception:
+                            pass
+
+                # Load cameras
+                for cam in cameras_to_load:
+                    try:
+                        camera = self.core.camera_manager.add_camera(
+                            cam['name'],
+                            cam['backend'],
+                            cam['device_id'],
+                            cam['camera_info']
+                        )
+
+                        for prop_id, value in cam['properties'].items():
+                            prop_id_int = int(prop_id)
+                            if prop_id_int in [cv.CAP_PROP_FOURCC, cv.CAP_PROP_FRAME_WIDTH, cv.CAP_PROP_FRAME_HEIGHT]:
+                                camera.set_property(prop_id_int, float(int(value)))
+                            else:
+                                camera.set_property(prop_id_int, float(value))
+
+                        if cam.get('calibration_data') is not None:
+                            from .camera_calibration import CameraCalibrationData
+                            calib_dict = cam['calibration_data']
+                            camera.calibration_data = CameraCalibrationData(
+                                mtx=np.array(calib_dict['mtx']),
+                                dist=np.array(calib_dict['dist']),
+                                rvecs_list=[np.array(rvec) for rvec in calib_dict['rvecs_list']],
+                                tvecs_list=[np.array(tvec) for tvec in calib_dict['tvecs_list']],
+                                mean_reprojection_error=calib_dict['mean_reprojection_error'],
+                                resolution=tuple(calib_dict['resolution'])
+                            )
+
+                        camera.start()
+                        loaded_cameras += 1
+
+                    except Exception as e:
+                        print(f"Failed to load camera '{cam['name']}': {str(e)}")
+
+            # Load projectors second
+            if projectors_data:
+                for proj_data in projectors_data:
+                    if self.core.projector_manager.projector_exists(proj_data['name']):
+                        try:
+                            self.core.projector_manager.remove_projector(proj_data['name'])
+                        except Exception:
+                            pass
+
+                    try:
+                        self.core.projector_manager.add_projector(
+                            proj_data['name'],
+                            tuple(proj_data['resolution'])
+                        )
+                        loaded_projectors += 1
+                    except Exception as e:
+                        print(f"Failed to load projector '{proj_data['name']}': {str(e)}")
+
+            # Load zones last
+            if zones_data:
+                for zone_data in zones_data:
+                    if self.core.zone_manager.zone_exists(zone_data['name']):
+                        try:
+                            self.core.zone_manager.remove_zone(zone_data['name'])
+                        except Exception:
+                            pass
+
+                    try:
+                        zone = Zone.from_dict(zone_data)
+                        self.core.zone_manager.add_zone(zone)
+                        loaded_zones += 1
+                    except Exception as e:
+                        import traceback
+                        error_msg = f"Failed to load zone '{zone_data.get('name', 'unknown')}': {str(e)}\n{traceback.format_exc()}"
+                        print(error_msg)
+
+            # Trigger selection change callbacks to update UI
+            self._on_camera_selection_changed()
+            self._on_projector_selection_changed()
+            self._on_zone_selection_changed()
+
+            # Show summary
+            QtWidgets.QMessageBox.information(
+                self,
+                "Master Configuration Loaded",
+                f"Successfully loaded:\n"
+                f"  - {loaded_cameras} camera(s)\n"
+                f"  - {loaded_projectors} projector(s)\n"
+                f"  - {loaded_zones} zone(s)"
+            )
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error Loading Master Configuration",
+                f"Failed to load master configuration: {str(e)}"
             )
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:

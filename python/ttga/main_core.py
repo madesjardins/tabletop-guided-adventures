@@ -23,6 +23,7 @@ from __future__ import annotations
 from .camera_manager import CameraManager
 from .camera_calibration import CameraCalibration
 from .projector_manager import ProjectorManager
+from .zone_manager import ZoneManager
 
 
 class MainCore:
@@ -35,6 +36,7 @@ class MainCore:
         camera_manager: Manager for all active cameras.
         camera_calibration: Camera calibration manager.
         projector_manager: Manager for all projectors.
+        zone_manager: Manager for all zones.
     """
 
     def __init__(self) -> None:
@@ -42,8 +44,10 @@ class MainCore:
         self.camera_manager = CameraManager()
         self.camera_calibration = CameraCalibration()
         self.projector_manager = ProjectorManager()
+        self.zone_manager = ZoneManager()
 
     def release_all(self) -> None:
         """Release all resources."""
         self.camera_manager.release_all()
         self.projector_manager.clear_all()
+        self.zone_manager.clear_all()
