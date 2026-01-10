@@ -29,6 +29,10 @@ class CameraMapping:
         vertices: List of 4 (x, y) tuples representing the quadrilateral vertices.
         lock_vertices: Whether vertices are locked from editing.
         enabled: Whether the camera mapping is enabled.
+        is_calibrated: Whether the mapping has been calibrated.
+        camera_to_game_matrix: Transform matrix from camera to game coordinates.
+        game_to_camera_matrix: Transform matrix from game to camera coordinates.
+        roi: ROI bounding box dict with min_x, min_y, max_x, max_y.
         overlay_needs_update: Flag indicating overlay image needs regeneration.
         camera_overlay: Cached overlay image (not serialized).
     """
@@ -41,6 +45,10 @@ class CameraMapping:
     ])
     lock_vertices: bool = False
     enabled: bool = True
+    is_calibrated: bool = False
+    camera_to_game_matrix: np.ndarray | None = None
+    game_to_camera_matrix: np.ndarray | None = None
+    roi: dict[str, int] | None = None
     overlay_needs_update: bool = field(default=True, init=False, repr=False)
     camera_overlay: any = field(default=None, init=False, repr=False)
 
@@ -51,12 +59,20 @@ class CameraMapping:
             Dictionary containing camera mapping data.
         """
         # Note: overlay_needs_update and camera_overlay are not serialized
-        return {
+        result = {
             'camera_name': self.camera_name,
             'vertices': self.vertices,
             'lock_vertices': self.lock_vertices,
-            'enabled': self.enabled
+            'enabled': self.enabled,
+            'is_calibrated': self.is_calibrated,
+            'roi': self.roi
         }
+        # Serialize matrices as lists if they exist
+        if self.camera_to_game_matrix is not None:
+            result['camera_to_game_matrix'] = self.camera_to_game_matrix.tolist()
+        if self.game_to_camera_matrix is not None:
+            result['game_to_camera_matrix'] = self.game_to_camera_matrix.tolist()
+        return result
 
     def invalidate_overlay(self) -> None:
         """Mark overlay as needing update and clear cached overlay."""
@@ -73,12 +89,20 @@ class CameraMapping:
         Returns:
             CameraMapping instance.
         """
-        return CameraMapping(
+        mapping = CameraMapping(
             camera_name=data['camera_name'],
             vertices=[tuple(v) for v in data['vertices']],
             lock_vertices=data.get('lock_vertices', False),
-            enabled=data.get('enabled', True)
+            enabled=data.get('enabled', True),
+            is_calibrated=data.get('is_calibrated', False),
+            roi=data.get('roi')
         )
+        # Deserialize matrices from lists if they exist
+        if 'camera_to_game_matrix' in data:
+            mapping.camera_to_game_matrix = np.array(data['camera_to_game_matrix'])
+        if 'game_to_camera_matrix' in data:
+            mapping.game_to_camera_matrix = np.array(data['game_to_camera_matrix'])
+        return mapping
 
 
 @dataclass
@@ -90,6 +114,10 @@ class ProjectorMapping:
         vertices: List of 4 (x, y) tuples representing the quadrilateral vertices.
         lock_vertices: Whether vertices are locked from editing.
         enabled: Whether the projector mapping is enabled.
+        is_calibrated: Whether the mapping has been calibrated.
+        projector_to_game_matrix: Transform matrix from projector to game coordinates.
+        game_to_projector_matrix: Transform matrix from game to projector coordinates.
+        roi: ROI bounding box dict with min_x, min_y, max_x, max_y.
         overlay_needs_update: Flag indicating overlay image needs regeneration.
         projector_overlay: Cached overlay image (not serialized).
     """
@@ -102,6 +130,10 @@ class ProjectorMapping:
     ])
     lock_vertices: bool = False
     enabled: bool = True
+    is_calibrated: bool = False
+    projector_to_game_matrix: np.ndarray | None = None
+    game_to_projector_matrix: np.ndarray | None = None
+    roi: dict[str, int] | None = None
     overlay_needs_update: bool = field(default=True, init=False, repr=False)
     projector_overlay: tuple | None = field(default=None, init=False, repr=False)
 
@@ -121,12 +153,20 @@ class ProjectorMapping:
         Returns:
             Dictionary containing projector mapping data.
         """
-        return {
+        result = {
             'projector_name': self.projector_name,
             'vertices': self.vertices,
             'lock_vertices': self.lock_vertices,
-            'enabled': self.enabled
+            'enabled': self.enabled,
+            'is_calibrated': self.is_calibrated,
+            'roi': self.roi
         }
+        # Serialize matrices as lists if they exist
+        if self.projector_to_game_matrix is not None:
+            result['projector_to_game_matrix'] = self.projector_to_game_matrix.tolist()
+        if self.game_to_projector_matrix is not None:
+            result['game_to_projector_matrix'] = self.game_to_projector_matrix.tolist()
+        return result
 
     @staticmethod
     def from_dict(data: dict) -> 'ProjectorMapping':
@@ -138,12 +178,20 @@ class ProjectorMapping:
         Returns:
             ProjectorMapping instance.
         """
-        return ProjectorMapping(
+        mapping = ProjectorMapping(
             projector_name=data['projector_name'],
             vertices=[tuple(v) for v in data['vertices']],
             lock_vertices=data.get('lock_vertices', False),
-            enabled=data.get('enabled', True)
+            enabled=data.get('enabled', True),
+            is_calibrated=data.get('is_calibrated', False),
+            roi=data.get('roi')
         )
+        # Deserialize matrices from lists if they exist
+        if 'projector_to_game_matrix' in data:
+            mapping.projector_to_game_matrix = np.array(data['projector_to_game_matrix'])
+        if 'game_to_projector_matrix' in data:
+            mapping.game_to_projector_matrix = np.array(data['game_to_projector_matrix'])
+        return mapping
 
 
 class Zone:
@@ -399,3 +447,251 @@ class Zone:
         self.projector_mapping.overlay_needs_update = False
 
         return result
+
+    def get_game_dimensions(self) -> tuple[int, int]:
+        """Get game dimensions in pixels.
+
+        Returns:
+            Tuple of (width_px, height_px).
+        """
+        width_px = int(round(self.width * self.resolution))
+        height_px = int(round(self.height * self.resolution))
+        return (width_px, height_px)
+
+    def camera_to_game(self, pos: tuple[float, float], rounded: bool = False) -> tuple[float, float]:
+        """Transform a position from camera coordinates to game coordinates.
+
+        Args:
+            pos: The (x, y) position in camera ROI coordinates.
+            rounded: Whether to round the result and return integers.
+
+        Returns:
+            Transformed position in game coordinates.
+
+        Raises:
+            ValueError: If camera mapping is not calibrated.
+        """
+        if not self.camera_mapping or not self.camera_mapping.is_calibrated:
+            raise ValueError("Camera mapping is not calibrated")
+
+        pos_homo = np.float32([pos[0], pos[1], 1.0])
+        warp_pos_homo = self.camera_mapping.camera_to_game_matrix.dot(pos_homo)
+        warp_pos = (warp_pos_homo / warp_pos_homo[2])[:2]
+
+        if rounded:
+            return (round(warp_pos[0]), round(warp_pos[1]))
+        return tuple(warp_pos)
+
+    def game_to_camera(self, pos: tuple[float, float], rounded: bool = False) -> tuple[float, float]:
+        """Transform a position from game coordinates to camera coordinates.
+
+        Args:
+            pos: The (x, y) position in game coordinates.
+            rounded: Whether to round the result and return integers.
+
+        Returns:
+            Transformed position in camera ROI coordinates.
+
+        Raises:
+            ValueError: If camera mapping is not calibrated.
+        """
+        if not self.camera_mapping or not self.camera_mapping.is_calibrated:
+            raise ValueError("Camera mapping is not calibrated")
+
+        pos_homo = np.float32([pos[0], pos[1], 1.0])
+        warp_pos_homo = self.camera_mapping.game_to_camera_matrix.dot(pos_homo)
+        warp_pos = (warp_pos_homo / warp_pos_homo[2])[:2]
+
+        if rounded:
+            return (round(warp_pos[0]), round(warp_pos[1]))
+        return tuple(warp_pos)
+
+    def projector_to_game(self, pos: tuple[float, float], rounded: bool = False) -> tuple[float, float]:
+        """Transform a position from projector coordinates to game coordinates.
+
+        Args:
+            pos: The (x, y) position in projector ROI coordinates.
+            rounded: Whether to round the result and return integers.
+
+        Returns:
+            Transformed position in game coordinates.
+
+        Raises:
+            ValueError: If projector mapping is not calibrated.
+        """
+        if not self.projector_mapping or not self.projector_mapping.is_calibrated:
+            raise ValueError("Projector mapping is not calibrated")
+
+        pos_homo = np.float32([pos[0], pos[1], 1.0])
+        warp_pos_homo = self.projector_mapping.projector_to_game_matrix.dot(pos_homo)
+        warp_pos = (warp_pos_homo / warp_pos_homo[2])[:2]
+
+        if rounded:
+            return (round(warp_pos[0]), round(warp_pos[1]))
+        return tuple(warp_pos)
+
+    def game_to_projector(self, pos: tuple[float, float], rounded: bool = False) -> tuple[float, float]:
+        """Transform a position from game coordinates to projector coordinates.
+
+        Args:
+            pos: The (x, y) position in game coordinates.
+            rounded: Whether to round the result and return integers.
+
+        Returns:
+            Transformed position in projector ROI coordinates.
+
+        Raises:
+            ValueError: If projector mapping is not calibrated.
+        """
+        if not self.projector_mapping or not self.projector_mapping.is_calibrated:
+            raise ValueError("Projector mapping is not calibrated")
+
+        pos_homo = np.float32([pos[0], pos[1], 1.0])
+        warp_pos_homo = self.projector_mapping.game_to_projector_matrix.dot(pos_homo)
+        warp_pos = (warp_pos_homo / warp_pos_homo[2])[:2]
+
+        if rounded:
+            return (round(warp_pos[0]), round(warp_pos[1]))
+        return tuple(warp_pos)
+
+    def warp_game_to_camera(self, image: np.ndarray) -> np.ndarray:
+        """Warp a game image to camera ROI coordinates.
+
+        Args:
+            image: Game image (numpy array).
+
+        Returns:
+            Warped image in camera ROI dimensions.
+
+        Raises:
+            ValueError: If camera mapping is not calibrated.
+        """
+        if not self.camera_mapping or not self.camera_mapping.is_calibrated:
+            raise ValueError("Camera mapping is not calibrated")
+
+        roi = self.camera_mapping.roi
+        width = roi['max_x'] - roi['min_x'] + 1
+        height = roi['max_y'] - roi['min_y'] + 1
+        return cv2.warpPerspective(image, self.camera_mapping.game_to_camera_matrix, (width, height))
+
+    def warp_game_to_projector(self, image: np.ndarray) -> np.ndarray:
+        """Warp a game image to projector ROI coordinates.
+
+        Args:
+            image: Game image (numpy array).
+
+        Returns:
+            Warped image in projector ROI dimensions.
+
+        Raises:
+            ValueError: If projector mapping is not calibrated.
+        """
+        if not self.projector_mapping or not self.projector_mapping.is_calibrated:
+            raise ValueError("Projector mapping is not calibrated")
+
+        roi = self.projector_mapping.roi
+        width = roi['max_x'] - roi['min_x'] + 1
+        height = roi['max_y'] - roi['min_y'] + 1
+        return cv2.warpPerspective(image, self.projector_mapping.game_to_projector_matrix, (width, height))
+
+    def calibrate(self) -> None:
+        """Calibrate the zone by calculating transform matrices for enabled mappings.
+
+        This calculates the perspective transform matrices between game coordinates
+        and camera/projector coordinates for all enabled mappings.
+
+        Raises:
+            ValueError: If no mappings are enabled.
+        """
+        if not self.camera_mapping or not self.camera_mapping.enabled:
+            if not self.projector_mapping or not self.projector_mapping.enabled:
+                raise ValueError("Cannot calibrate: no mappings are enabled")
+
+        # Calculate game dimensions
+        width_px, height_px = self.get_game_dimensions()
+
+        # Game corner points (P0, P1, P2, P3)
+        game_points = np.float32([
+            [0, 0],                                 # P0: top-left
+            [width_px - 1, 0],                      # P1: top-right
+            [width_px - 1, height_px - 1],          # P2: bottom-right
+            [0, height_px - 1]                      # P3: bottom-left
+        ])
+
+        # Calibrate camera mapping if enabled
+        if self.camera_mapping and self.camera_mapping.enabled:
+            vertices = self.camera_mapping.vertices
+
+            # Calculate ROI
+            xs = [v[0] for v in vertices]
+            ys = [v[1] for v in vertices]
+            roi = {
+                'min_x': min(xs),
+                'min_y': min(ys),
+                'max_x': max(xs),
+                'max_y': max(ys)
+            }
+
+            # Adjust vertices to ROI coordinates
+            roi_vertices = np.float32([
+                [v[0] - roi['min_x'], v[1] - roi['min_y']] for v in vertices
+            ])
+
+            # Calculate transform matrices
+            self.camera_mapping.camera_to_game_matrix = cv2.getPerspectiveTransform(roi_vertices, game_points)
+            self.camera_mapping.game_to_camera_matrix = cv2.getPerspectiveTransform(game_points, roi_vertices)
+            self.camera_mapping.roi = roi
+            self.camera_mapping.is_calibrated = True
+            self.camera_mapping.lock_vertices = True
+
+        # Calibrate projector mapping if enabled
+        if self.projector_mapping and self.projector_mapping.enabled:
+            vertices = self.projector_mapping.vertices
+
+            # Calculate ROI
+            xs = [v[0] for v in vertices]
+            ys = [v[1] for v in vertices]
+            roi = {
+                'min_x': min(xs),
+                'min_y': min(ys),
+                'max_x': max(xs),
+                'max_y': max(ys)
+            }
+
+            # Adjust vertices to ROI coordinates
+            roi_vertices = np.float32([
+                [v[0] - roi['min_x'], v[1] - roi['min_y']] for v in vertices
+            ])
+
+            # Calculate transform matrices
+            self.projector_mapping.projector_to_game_matrix = cv2.getPerspectiveTransform(roi_vertices, game_points)
+            self.projector_mapping.game_to_projector_matrix = cv2.getPerspectiveTransform(game_points, roi_vertices)
+            self.projector_mapping.roi = roi
+            self.projector_mapping.is_calibrated = True
+            self.projector_mapping.lock_vertices = True
+
+    def uncalibrate(self) -> None:
+        """Uncalibrate the zone by clearing transform matrices and calibration state."""
+        if self.camera_mapping:
+            self.camera_mapping.is_calibrated = False
+            self.camera_mapping.camera_to_game_matrix = None
+            self.camera_mapping.game_to_camera_matrix = None
+            self.camera_mapping.roi = None
+
+        if self.projector_mapping:
+            self.projector_mapping.is_calibrated = False
+            self.projector_mapping.projector_to_game_matrix = None
+            self.projector_mapping.game_to_projector_matrix = None
+            self.projector_mapping.roi = None
+
+    def is_calibrated(self) -> bool:
+        """Check if the zone is calibrated.
+
+        Returns:
+            True if any enabled mapping is calibrated.
+        """
+        if self.camera_mapping and self.camera_mapping.enabled and self.camera_mapping.is_calibrated:
+            return True
+        if self.projector_mapping and self.projector_mapping.enabled and self.projector_mapping.is_calibrated:
+            return True
+        return False

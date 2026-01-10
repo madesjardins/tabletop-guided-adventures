@@ -560,6 +560,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.projector_section_layout = projector_layout
         main_layout.addWidget(self.projector_section)
 
+        # Right section: Calibration buttons
+        right_section = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(right_section)
+
+        # Calibrate button
+        self.zone_calibrate_button = QtWidgets.QPushButton("Calibrate")
+        self.zone_calibrate_button.clicked.connect(self._on_zone_calibrate)
+        right_layout.addWidget(self.zone_calibrate_button)
+
+        # Uncalibrate button
+        self.zone_uncalibrate_button = QtWidgets.QPushButton("Uncalibrate")
+        self.zone_uncalibrate_button.clicked.connect(self._on_zone_uncalibrate)
+        right_layout.addWidget(self.zone_uncalibrate_button)
+
+        right_layout.addStretch()
+        main_layout.addWidget(right_section)
+
         # Initially hide mapping groups
         self.zone_camera_mapping_group.setVisible(False)
         self.zone_projector_mapping_group.setVisible(False)
@@ -614,6 +631,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.zone_name_label.parent().setVisible(visible)
         self.zone_camera_enabled_checkbox.parent().setVisible(visible)
         self.zone_projector_enabled_checkbox.parent().setVisible(visible)
+
+        # Show/hide calibration buttons
+        self.zone_calibrate_button.setVisible(visible)
+        self.zone_uncalibrate_button.setVisible(visible)
 
         # Hide mapping sections when no zone is selected
         if not visible:
@@ -755,6 +776,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.zone_draw_locked_borders_checkbox.setChecked(zone.draw_locked_borders)
         self.zone_draw_locked_borders_checkbox.blockSignals(False)
 
+        # Update UI state based on calibration status
+        self._update_zone_ui_state()
+
     def _update_camera_combo(self) -> None:
         """Update camera combo box with available cameras."""
         current = self.zone_camera_combo.currentText()
@@ -821,6 +845,79 @@ class MainWindow(QtWidgets.QMainWindow):
         self.zone_projector_p3_x.setEnabled(not locked)
         self.zone_projector_p3_y.setEnabled(not locked)
 
+    def _update_zone_ui_state(self) -> None:
+        """Update UI state based on zone calibration status."""
+        zone = self._get_selected_zone()
+        if not zone:
+            return
+
+        is_calibrated = zone.is_calibrated()
+
+        # Check if any mapping is enabled
+        has_enabled_mapping = (
+            (zone.camera_mapping and zone.camera_mapping.enabled) or
+            (zone.projector_mapping and zone.projector_mapping.enabled)
+        )
+
+        # Hide calibration buttons if no mappings are enabled
+        self.zone_calibrate_button.setVisible(has_enabled_mapping)
+        self.zone_uncalibrate_button.setVisible(has_enabled_mapping)
+
+        # Update button states (only matters if visible)
+        self.zone_calibrate_button.setEnabled(not is_calibrated)
+        self.zone_uncalibrate_button.setEnabled(is_calibrated)
+
+        # When calibrated, disable all controls except draw_locked_borders
+        self.zone_width_spinbox.setEnabled(not is_calibrated)
+        self.zone_height_spinbox.setEnabled(not is_calibrated)
+        self.zone_unit_combo.setEnabled(not is_calibrated)
+        self.zone_resolution_spinbox.setEnabled(not is_calibrated)
+        self.zone_camera_enabled_checkbox.setEnabled(not is_calibrated)
+        self.zone_projector_enabled_checkbox.setEnabled(not is_calibrated)
+
+        # Camera mapping controls
+        if zone.camera_mapping and zone.camera_mapping.enabled:
+            self.zone_camera_combo.setEnabled(not is_calibrated)
+            self.zone_camera_lock_vertices_checkbox.setEnabled(not is_calibrated)
+
+            # Update lock state if calibrated
+            if is_calibrated and zone.camera_mapping.is_calibrated:
+                self.zone_camera_lock_vertices_checkbox.setChecked(True)
+
+            # Vertex spinboxes disabled when calibrated or locked
+            locked_or_calibrated = is_calibrated or zone.camera_mapping.lock_vertices
+            self.zone_camera_p0_x.setEnabled(not locked_or_calibrated)
+            self.zone_camera_p0_y.setEnabled(not locked_or_calibrated)
+            self.zone_camera_p1_x.setEnabled(not locked_or_calibrated)
+            self.zone_camera_p1_y.setEnabled(not locked_or_calibrated)
+            self.zone_camera_p2_x.setEnabled(not locked_or_calibrated)
+            self.zone_camera_p2_y.setEnabled(not locked_or_calibrated)
+            self.zone_camera_p3_x.setEnabled(not locked_or_calibrated)
+            self.zone_camera_p3_y.setEnabled(not locked_or_calibrated)
+
+        # Projector mapping controls
+        if zone.projector_mapping and zone.projector_mapping.enabled:
+            self.zone_projector_combo.setEnabled(not is_calibrated)
+            self.zone_projector_lock_vertices_checkbox.setEnabled(not is_calibrated)
+
+            # Update lock state if calibrated
+            if is_calibrated and zone.projector_mapping.is_calibrated:
+                self.zone_projector_lock_vertices_checkbox.setChecked(True)
+
+            # Vertex spinboxes disabled when calibrated or locked
+            locked_or_calibrated = is_calibrated or zone.projector_mapping.lock_vertices
+            self.zone_projector_p0_x.setEnabled(not locked_or_calibrated)
+            self.zone_projector_p0_y.setEnabled(not locked_or_calibrated)
+            self.zone_projector_p1_x.setEnabled(not locked_or_calibrated)
+            self.zone_projector_p1_y.setEnabled(not locked_or_calibrated)
+            self.zone_projector_p2_x.setEnabled(not locked_or_calibrated)
+            self.zone_projector_p2_y.setEnabled(not locked_or_calibrated)
+            self.zone_projector_p3_x.setEnabled(not locked_or_calibrated)
+            self.zone_projector_p3_y.setEnabled(not locked_or_calibrated)
+
+        # Draw locked borders is always enabled
+        self.zone_draw_locked_borders_checkbox.setEnabled(True)
+
     def _get_selected_zone(self):
         """Get the currently selected zone if exactly one is selected."""
         selected_items = self.zone_list.selectedItems()
@@ -831,6 +928,37 @@ class MainWindow(QtWidgets.QMainWindow):
             except KeyError:
                 return None
         return None
+
+    def _validate_zone_references(self, zone) -> tuple[bool, str]:
+        """Validate that a zone's camera and projector references exist.
+
+        Args:
+            zone: Zone object to validate.
+
+        Returns:
+            Tuple of (is_valid, error_message). error_message is empty if valid.
+        """
+        missing_items = []
+
+        # Check camera mapping
+        if zone.camera_mapping and zone.camera_mapping.camera_name:
+            try:
+                self.core.camera_manager.get_camera(zone.camera_mapping.camera_name)
+            except KeyError:
+                missing_items.append(f"Camera '{zone.camera_mapping.camera_name}'")
+
+        # Check projector mapping
+        if zone.projector_mapping and zone.projector_mapping.projector_name:
+            try:
+                self.core.projector_manager.get_projector(zone.projector_mapping.projector_name)
+            except KeyError:
+                missing_items.append(f"Projector '{zone.projector_mapping.projector_name}'")
+
+        if missing_items:
+            error_msg = f"Zone '{zone.name}' references missing device(s):\n" + "\n".join(f"  - {item}" for item in missing_items)
+            return (False, error_msg)
+
+        return (True, "")
 
     @QtCore.Slot(float)
     def _on_zone_width_changed(self, value: float) -> None:
@@ -1083,6 +1211,43 @@ class MainWindow(QtWidgets.QMainWindow):
             zone.projector_mapping.lock_vertices = state == QtCore.Qt.CheckState.Checked.value
             zone.projector_mapping.invalidate_overlay()
             self._update_projector_vertices_enabled()
+
+    @QtCore.Slot()
+    def _on_zone_calibrate(self) -> None:
+        """Handle calibrate button click."""
+        zone = self._get_selected_zone()
+        if not zone:
+            return
+
+        try:
+            zone.calibrate()
+            self._update_zone_ui_state()
+            QtWidgets.QMessageBox.information(
+                self,
+                "Calibration Complete",
+                f"Zone '{zone.name}' has been calibrated successfully."
+            )
+        except ValueError as e:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Calibration Failed",
+                str(e)
+            )
+
+    @QtCore.Slot()
+    def _on_zone_uncalibrate(self) -> None:
+        """Handle uncalibrate button click."""
+        zone = self._get_selected_zone()
+        if not zone:
+            return
+
+        zone.uncalibrate()
+        self._update_zone_ui_state()
+        QtWidgets.QMessageBox.information(
+            self,
+            "Uncalibration Complete",
+            f"Zone '{zone.name}' has been uncalibrated."
+        )
 
     def _create_camera_tabs(self) -> QtWidgets.QTabWidget:
         """Create the camera tab widget.
@@ -2642,6 +2807,17 @@ class MainWindow(QtWidgets.QMainWindow):
             for zone_data in zones_data:
                 try:
                     zone = Zone.from_dict(zone_data)
+
+                    # Validate that referenced cameras/projectors exist
+                    is_valid, error_msg = self._validate_zone_references(zone)
+                    if not is_valid:
+                        QtWidgets.QMessageBox.warning(
+                            self,
+                            "Missing Device Reference",
+                            error_msg
+                        )
+                        continue
+
                     self.core.zone_manager.add_zone(zone)
                     loaded_count += 1
                 except Exception as e:
@@ -2998,6 +3174,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
                     try:
                         zone = Zone.from_dict(zone_data)
+
+                        # Validate that referenced cameras/projectors exist
+                        is_valid, error_msg = self._validate_zone_references(zone)
+                        if not is_valid:
+                            print(f"Skipping zone due to missing references: {error_msg}")
+                            continue
+
                         self.core.zone_manager.add_zone(zone)
                         loaded_zones += 1
                     except Exception as e:
