@@ -72,6 +72,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.core.zone_manager.zone_added.connect(self._on_zone_added)
         self.core.zone_manager.zone_removed.connect(self._on_zone_removed)
 
+        # Connect speech recognition signals
+        self.core.speech_partial_result.connect(self._on_speech_partial_result)
+        self.core.speech_final_result.connect(self._on_speech_final_result)
+
         # Initialize zone settings UI state
         self._on_zone_selection_changed()
 
@@ -272,11 +276,9 @@ class MainWindow(QtWidgets.QMainWindow):
         zone_settings_widget = self._create_zone_settings_widget()
         tabs.addTab(zone_settings_widget, "Zone Settings")
 
-        # Voice tab
-        voice_widget = QtWidgets.QWidget()
-        voice_layout = QtWidgets.QVBoxLayout(voice_widget)
-        voice_layout.addWidget(QtWidgets.QLabel("Voice settings will be added here"))
-        tabs.addTab(voice_widget, "Voice")
+        # Speech Recognition tab
+        speech_recognition_widget = self._create_speech_recognition_widget()
+        tabs.addTab(speech_recognition_widget, "Speech Recognition")
 
         # Sound tab
         sound_widget = QtWidgets.QWidget()
@@ -596,6 +598,107 @@ class MainWindow(QtWidgets.QMainWindow):
         self.zone_settings_message_label.setVisible(False)
 
         return widget
+
+    def _create_speech_recognition_widget(self) -> QtWidgets.QWidget:
+        """Create the speech recognition widget.
+
+        Returns:
+            Widget containing speech recognition controls.
+        """
+        widget = QtWidgets.QWidget()
+        main_layout = QtWidgets.QHBoxLayout(widget)
+
+        # Configuration group (fixed width on left)
+        config_group = QtWidgets.QGroupBox("Configuration")
+        config_group.setMaximumWidth(350)
+        config_layout = QtWidgets.QFormLayout(config_group)
+
+        # Vosk model combo box
+        self.speech_model_combo = QtWidgets.QComboBox()
+        config_layout.addRow("Vosk Model:", self.speech_model_combo)
+
+        # Audio device combo box
+        self.speech_device_combo = QtWidgets.QComboBox()
+        config_layout.addRow("Audio Device:", self.speech_device_combo)
+
+        # Similarity threshold spinbox
+        self.speech_threshold_spinbox = QtWidgets.QDoubleSpinBox()
+        self.speech_threshold_spinbox.setRange(0.0, 1.0)
+        self.speech_threshold_spinbox.setSingleStep(0.05)
+        self.speech_threshold_spinbox.setValue(0.7)
+        self.speech_threshold_spinbox.setDecimals(2)
+        config_layout.addRow("Similarity Threshold:", self.speech_threshold_spinbox)
+
+        main_layout.addWidget(config_group)
+
+        # Results group (takes remaining space on right)
+        results_group = QtWidgets.QGroupBox("Recognition Results")
+        results_layout = QtWidgets.QFormLayout(results_group)
+
+        # Partial result line edit
+        self.speech_partial_result_edit = QtWidgets.QLineEdit()
+        self.speech_partial_result_edit.setReadOnly(True)
+        self.speech_partial_result_edit.setPlaceholderText("Partial recognition appears here...")
+        results_layout.addRow("Partial:", self.speech_partial_result_edit)
+
+        # Final result line edit
+        self.speech_final_result_edit = QtWidgets.QLineEdit()
+        self.speech_final_result_edit.setReadOnly(True)
+        self.speech_final_result_edit.setPlaceholderText("Final recognition appears here...")
+        results_layout.addRow("Final:", self.speech_final_result_edit)
+
+        main_layout.addWidget(results_group)
+
+        # Populate vosk models
+        self._populate_vosk_models()
+
+        # Populate audio devices
+        self._populate_audio_devices()
+
+        # Connect signals
+        self.speech_model_combo.currentIndexChanged.connect(self._on_speech_model_changed)
+        self.speech_device_combo.currentIndexChanged.connect(self._on_speech_device_changed)
+        self.speech_threshold_spinbox.valueChanged.connect(self._on_speech_threshold_changed)
+
+        # Initialize MainCore with default values if combo boxes have items
+        if self.speech_model_combo.count() > 0:
+            model_path = self.speech_model_combo.itemData(0)
+            if model_path:
+                self.core.speech_model_path = model_path
+
+        if self.speech_device_combo.count() > 0:
+            device_index = self.speech_device_combo.itemData(0)
+            if device_index is not None:
+                self.core.speech_device_index = device_index
+
+        return widget
+
+    def _populate_vosk_models(self) -> None:
+        """Populate the vosk model combo box with available models."""
+        import os
+
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        vosk_models_path = os.path.join(root_dir, "vosk_models")
+
+        self.speech_model_combo.clear()
+
+        if os.path.exists(vosk_models_path):
+            models = [d for d in os.listdir(vosk_models_path)
+                      if os.path.isdir(os.path.join(vosk_models_path, d))]
+            for model in sorted(models):
+                model_path = os.path.join(vosk_models_path, model)
+                self.speech_model_combo.addItem(model, model_path)
+
+    def _populate_audio_devices(self) -> None:
+        """Populate the audio device combo box with available devices."""
+        from .speech_recognition import get_audio_input_devices
+
+        self.speech_device_combo.clear()
+
+        devices = get_audio_input_devices()
+        for device in devices:
+            device_label = f"{device['index']}: {device['name']}"
+            self.speech_device_combo.addItem(device_label, device['index'])
 
     def _set_section_spacer_visible(self, layout: QtWidgets.QVBoxLayout, visible: bool) -> None:
         """Show or hide the stretch spacer in a section layout.
@@ -1248,6 +1351,114 @@ class MainWindow(QtWidgets.QMainWindow):
             "Uncalibration Complete",
             f"Zone '{zone.name}' has been uncalibrated."
         )
+
+    @QtCore.Slot(int)
+    def _on_speech_model_changed(self, index: int) -> None:
+        """Handle speech model selection change."""
+        if index < 0:
+            return
+
+        model_path = self.speech_model_combo.itemData(index)
+        if model_path:
+            self.core.update_speech_recognizer(model_path=model_path)
+
+    @QtCore.Slot(int)
+    def _on_speech_device_changed(self, index: int) -> None:
+        """Handle speech device selection change."""
+        if index < 0:
+            return
+
+        device_index = self.speech_device_combo.itemData(index)
+        if device_index is not None:
+            self.core.update_speech_recognizer(device_index=device_index)
+
+    @QtCore.Slot(float)
+    def _on_speech_threshold_changed(self, value: float) -> None:
+        """Handle speech threshold change."""
+        self.core.speech_threshold = value
+
+    @QtCore.Slot(str)
+    def _on_speech_partial_result(self, text: str) -> None:
+        """Handle partial speech recognition result."""
+        self.speech_partial_result_edit.setText(text)
+
+    @QtCore.Slot(str)
+    def _on_speech_final_result(self, text: str) -> None:
+        """Handle final speech recognition result."""
+        self.speech_final_result_edit.setText(text)
+
+    def _find_matching_vosk_model(self, saved_model_path: str) -> int:
+        """Find matching vosk model in combo box.
+
+        Args:
+            saved_model_path: The saved model path to match.
+
+        Returns:
+            Index of matching model, or index with 'small' in name, or 0 if no match.
+        """
+        import os
+
+        # Try exact match first
+        for i in range(self.speech_model_combo.count()):
+            if self.speech_model_combo.itemData(i) == saved_model_path:
+                return i
+
+        # Try matching just the model name (last part of path)
+        saved_model_name = os.path.basename(saved_model_path)
+        for i in range(self.speech_model_combo.count()):
+            model_path = self.speech_model_combo.itemData(i)
+            if model_path and os.path.basename(model_path) == saved_model_name:
+                return i
+
+        # Try finding one with 'small' in the name
+        for i in range(self.speech_model_combo.count()):
+            if 'small' in self.speech_model_combo.itemText(i).lower():
+                return i
+
+        # Default to first item
+        return 0 if self.speech_model_combo.count() > 0 else -1
+
+    def _find_matching_audio_device(self, saved_device_index: int, saved_device_name: str = None) -> int:
+        """Find matching audio device in combo box.
+
+        Prioritizes matching by device name, then by device index.
+
+        Args:
+            saved_device_index: The saved device index to match.
+            saved_device_name: The saved device name to match (optional but preferred).
+
+        Returns:
+            Combo box index of matching device, or 0 if no match.
+        """
+        from .speech_recognition import get_audio_input_devices
+
+        # Get current devices
+        devices = get_audio_input_devices()
+
+        # 1. Try matching by device name first (most reliable)
+        if saved_device_name:
+            for i in range(self.speech_device_combo.count()):
+                device_index = self.speech_device_combo.itemData(i)
+                if device_index is not None:
+                    for device in devices:
+                        if device['index'] == device_index and device['name'] == saved_device_name:
+                            return i
+
+            # Try partial match on device name (in case name changed slightly)
+            for i in range(self.speech_device_combo.count()):
+                item_text = self.speech_device_combo.itemText(i)
+                if saved_device_name in item_text or item_text in saved_device_name:
+                    return i
+
+        # 2. Try matching by device index
+        if saved_device_index is not None:
+            for i in range(self.speech_device_combo.count()):
+                device_index = self.speech_device_combo.itemData(i)
+                if device_index == saved_device_index:
+                    return i
+
+        # 3. Default to first item
+        return 0 if self.speech_device_combo.count() > 0 else -1
 
     def _create_camera_tabs(self) -> QtWidgets.QTabWidget:
         """Create the camera tab widget.
@@ -2894,6 +3105,23 @@ class MainWindow(QtWidgets.QMainWindow):
             # Get zones data
             zones_data = self.core.zone_manager.serialize_zones()
 
+            # Get speech recognition configuration
+            speech_config = {
+                'model_path': self.core.speech_model_path,
+                'device_index': self.core.speech_device_index,
+                'device_name': None,
+                'threshold': self.core.speech_threshold
+            }
+
+            # Get device name if device index is set
+            if self.core.speech_device_index is not None:
+                from .speech_recognition import get_audio_input_devices
+                devices = get_audio_input_devices()
+                for device in devices:
+                    if device['index'] == self.core.speech_device_index:
+                        speech_config['device_name'] = device['name']
+                        break
+
             # Create master configuration dictionary with standard structure
             master_config = {
                 'type': 'master',
@@ -2901,7 +3129,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 'data': {
                     'cameras': cameras_data,
                     'projectors': projectors_data,
-                    'zones': zones_data
+                    'zones': zones_data,
+                    'speech_recognition': speech_config
                 }
             }
 
@@ -3187,6 +3416,39 @@ class MainWindow(QtWidgets.QMainWindow):
                         import traceback
                         error_msg = f"Failed to load zone '{zone_data.get('name', 'unknown')}': {str(e)}\n{traceback.format_exc()}"
                         print(error_msg)
+
+            # Load speech recognition configuration
+            speech_config = master_data.get('speech_recognition', {})
+            if speech_config:
+                # Load threshold
+                threshold = speech_config.get('threshold', 0.7)
+                self.core.speech_threshold = threshold
+                self.speech_threshold_spinbox.blockSignals(True)
+                self.speech_threshold_spinbox.setValue(threshold)
+                self.speech_threshold_spinbox.blockSignals(False)
+
+                # Load and match vosk model
+                saved_model_path = speech_config.get('model_path')
+                if saved_model_path:
+                    model_index = self._find_matching_vosk_model(saved_model_path)
+                    if model_index >= 0:
+                        self.speech_model_combo.blockSignals(True)
+                        self.speech_model_combo.setCurrentIndex(model_index)
+                        self.speech_model_combo.blockSignals(False)
+                        model_path = self.speech_model_combo.itemData(model_index)
+                        self.core.update_speech_recognizer(model_path=model_path)
+
+                # Load and match audio device
+                saved_device_index = speech_config.get('device_index')
+                saved_device_name = speech_config.get('device_name')
+                if saved_device_index is not None or saved_device_name:
+                    device_combo_index = self._find_matching_audio_device(saved_device_index, saved_device_name)
+                    if device_combo_index >= 0:
+                        self.speech_device_combo.blockSignals(True)
+                        self.speech_device_combo.setCurrentIndex(device_combo_index)
+                        self.speech_device_combo.blockSignals(False)
+                        device_index = self.speech_device_combo.itemData(device_combo_index)
+                        self.core.update_speech_recognizer(device_index=device_index)
 
             # Trigger selection change callbacks to update UI
             self._on_camera_selection_changed()
