@@ -21,5 +21,12 @@ TEMP_DIR_PATH = os.path.join(ROOT_DIR_PATH, "temp")
 SAVED_ROOT_DIR_PATH = os.path.join(ROOT_DIR_PATH, "saved")
 SAVED_CAMERAS_DIR_PATH = os.path.join(SAVED_ROOT_DIR_PATH, "cameras")
 SAVED_PROJECTORS_DIR_PATH = os.path.join(SAVED_ROOT_DIR_PATH, "projectors")
+SAVED_ZONES_DIR_PATH = os.path.join(SAVED_ROOT_DIR_PATH, "zones")
 SAVED_SNAPSHOTS_DIR_PATH = os.path.join(SAVED_ROOT_DIR_PATH, "snapshots")
 SAVED_SNAPSHOT_FILE_PATH_TEMPLATE = os.path.join(SAVED_SNAPSHOTS_DIR_PATH, "{folder_name}", "{file_name}.png")
+SAVED_MASTER_CONFIGURATIONS_DIR_PATH = os.path.join(SAVED_ROOT_DIR_PATH, "master_configurations")
+
+# Zone mapping overlay visualization constants
+VERTEX_RADIUS = 12  # Radius in pixels for vertex circles
+EDGE_THICKNESS = 1  # Thickness in pixels for edges
+VERTEX_CIRCLE_THICKNESS = 2  # Thickness in pixels for vertex circles

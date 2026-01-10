@@ -24,7 +24,12 @@ class ProjectorViewport(QtWidgets.QLabel):
 
     This widget maintains the aspect ratio of the projector resolution
     when resized.
+
+    Signals:
+        vertex_updated: Emitted when a vertex is updated via dragging (zone_name: str).
     """
+
+    vertex_updated = QtCore.Signal(str)
 
     def __init__(self, resolution: tuple[int, int], projector_name: str,
                  parent: QtWidgets.QWidget | None = None) -> None:
@@ -43,8 +48,108 @@ class ProjectorViewport(QtWidgets.QLabel):
         self.setScaledContents(False)
         self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
-        # Generate test image
+        # Zone manager reference for overlay compositing
+        self._zone_manager = None
+
+        # Vertex dragging state
+        self._dragging_vertex: tuple | None = None  # (zone, vertex_idx)
+        self._drag_start_pos: tuple[int, int] | None = None
+
+        # Current refresh rate (fps)
+        self._fps = 30
+
+        # Frame update timer
+        self._timer = QtCore.QTimer(self)
+        self._timer.timeout.connect(self._update_display)
+
+        # Enable mouse tracking for interactions
+        self.setMouseTracking(True)
+
+        # Generate initial test image
         self._generate_test_image()
+
+        # Start timer
+        self._timer.start(int(1000 / self._fps))
+
+    def set_zone_manager(self, zone_manager) -> None:
+        """Set the zone manager for overlay compositing.
+
+        Args:
+            zone_manager: ZoneManager instance.
+        """
+        self._zone_manager = zone_manager
+
+    def _update_display(self) -> None:
+        """Update the displayed image with zone overlays."""
+        width, height = self.resolution
+
+        # Check if we have zones with projector mapping
+        if self._zone_manager is not None:
+            zones = self._zone_manager.get_zones_with_projector_mapping(self.projector_name)
+
+            if zones:
+                # Collect overlays to composite
+                overlays_to_composite = []
+                for zone in zones:
+                    overlay_data = zone.get_projector_overlay((height, width, 3))
+                    if overlay_data is not None:
+                        overlays_to_composite.append(overlay_data)
+
+                if overlays_to_composite:
+                    # Start with black base image
+                    image = np.zeros((height, width, 3), dtype=np.uint8)
+
+                    # Composite each overlay
+                    for overlay_data in overlays_to_composite:
+                        overlay, x, y, w, h = overlay_data
+
+                        # Extract ROI
+                        roi = image[y:y + h, x:x + w]
+
+                        # Composite BGRA overlay onto BGR ROI
+                        alpha = overlay[:, :, 3:4] / 255.0
+                        blended_roi = (roi * (1 - alpha) + overlay[:, :, :3] * alpha).astype(np.uint8)
+
+                        # Put blended ROI back
+                        image[y:y + h, x:x + w] = blended_roi
+
+                    self._display_image(image)
+                    return
+                else:
+                    # Zones exist but nothing to draw - show black image
+                    image = np.zeros((height, width, 3), dtype=np.uint8)
+                    self._display_image(image)
+                    return
+
+        # No zones or no zone manager - show test image
+        self._generate_test_image()
+
+    def _display_image(self, image: np.ndarray) -> None:
+        """Display a BGR image in the viewport.
+
+        Args:
+            image: BGR image to display.
+        """
+        # Convert to QPixmap
+        rgb_image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
+        h, w, ch = rgb_image.shape
+        bytes_per_line = ch * w
+        q_image = QtGui.QImage(
+            rgb_image.data,
+            w,
+            h,
+            bytes_per_line,
+            QtGui.QImage.Format.Format_RGB888
+        )
+        self.original_pixmap = QtGui.QPixmap.fromImage(q_image)
+
+        # Scale to fit viewport
+        scaled_pixmap = self.original_pixmap.scaled(
+            self.size(),
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation
+        )
+        self.setPixmap(scaled_pixmap)
 
     def _generate_test_image(self) -> None:
         """Generate a test image with black background, white border, and projector name."""
@@ -77,19 +182,151 @@ class ProjectorViewport(QtWidgets.QLabel):
         # Draw text in white
         cv.putText(image, text, (text_x, text_y), font, font_scale, (255, 255, 255), 2, cv.LINE_AA)
 
-        # Convert to QPixmap
-        rgb_image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
-        h, w, ch = rgb_image.shape
-        bytes_per_line = ch * w
-        q_image = QtGui.QImage(
-            rgb_image.data,
-            w,
-            h,
-            bytes_per_line,
-            QtGui.QImage.Format.Format_RGB888
-        )
-        self.original_pixmap = QtGui.QPixmap.fromImage(q_image)
-        self.setPixmap(self.original_pixmap)
+        # Display the image
+        self._display_image(image)
+
+    def _viewport_to_frame_coords(self, viewport_x: int, viewport_y: int) -> tuple[int, int] | None:
+        """Convert viewport coordinates to projector frame coordinates.
+
+        Args:
+            viewport_x: X coordinate in viewport.
+            viewport_y: Y coordinate in viewport.
+
+        Returns:
+            Tuple of (x, y) in projector frame coordinates, or None if invalid.
+        """
+        if not hasattr(self, 'original_pixmap'):
+            return None
+
+        # Get viewport and pixmap dimensions
+        viewport_width = self.width()
+        viewport_height = self.height()
+
+        frame_width, frame_height = self.resolution
+
+        # Calculate scaled pixmap dimensions (maintaining aspect ratio)
+        frame_aspect = frame_width / frame_height
+        viewport_aspect = viewport_width / viewport_height
+
+        if frame_aspect > viewport_aspect:
+            # Width-limited
+            scaled_width = viewport_width
+            scaled_height = int(viewport_width / frame_aspect)
+        else:
+            # Height-limited
+            scaled_height = viewport_height
+            scaled_width = int(viewport_height * frame_aspect)
+
+        # Calculate offset (pixmap is centered)
+        x_offset = (viewport_width - scaled_width) // 2
+        y_offset = (viewport_height - scaled_height) // 2
+
+        # Check if click is within the scaled pixmap area
+        if viewport_x < x_offset or viewport_x >= x_offset + scaled_width:
+            return None
+        if viewport_y < y_offset or viewport_y >= y_offset + scaled_height:
+            return None
+
+        # Normalize to scaled pixmap coordinates
+        rel_x = viewport_x - x_offset
+        rel_y = viewport_y - y_offset
+
+        # Map to frame coordinates
+        frame_x = int((rel_x / scaled_width) * frame_width)
+        frame_y = int((rel_y / scaled_height) * frame_height)
+
+        # Clamp to frame bounds
+        frame_x = max(0, min(frame_x, frame_width - 1))
+        frame_y = max(0, min(frame_y, frame_height - 1))
+
+        return (frame_x, frame_y)
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        """Handle mouse press events for vertex dragging.
+
+        Args:
+            event: Mouse event.
+        """
+        pos = event.position()
+        mouse_x = int(pos.x())
+        mouse_y = int(pos.y())
+
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            # Check for vertex dragging
+            if self._zone_manager is not None:
+                # Convert viewport coords to frame coords
+                frame_coords = self._viewport_to_frame_coords(mouse_x, mouse_y)
+
+                if frame_coords is not None:
+                    from .constants import VERTEX_RADIUS
+                    frame_x, frame_y = frame_coords
+
+                    # Find vertex at this position
+                    result = self._zone_manager.find_projector_vertex_at_position(
+                        self.projector_name, frame_x, frame_y, VERTEX_RADIUS
+                    )
+
+                    if result is not None:
+                        zone, vertex_idx = result
+                        self._dragging_vertex = (zone, vertex_idx)
+                        self._drag_start_pos = (mouse_x, mouse_y)
+                        self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
+                        event.accept()
+                        return
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        """Handle mouse move events for vertex dragging.
+
+        Args:
+            event: Mouse event.
+        """
+        pos = event.position()
+        mouse_x = int(pos.x())
+        mouse_y = int(pos.y())
+
+        # Handle vertex dragging
+        if self._dragging_vertex is not None:
+            zone, vertex_idx = self._dragging_vertex
+
+            # Convert viewport coords to frame coords
+            frame_coords = self._viewport_to_frame_coords(mouse_x, mouse_y)
+
+            if frame_coords is not None:
+                frame_x, frame_y = frame_coords
+
+                # Update vertex position
+                vertices = list(zone.projector_mapping.vertices)
+                vertices[vertex_idx] = (frame_x, frame_y)
+                zone.projector_mapping.vertices = vertices
+
+                # Invalidate overlay to force regeneration
+                zone.projector_mapping.invalidate_overlay()
+
+                # Emit signal to update UI
+                self.vertex_updated.emit(zone.name)
+
+                event.accept()
+                return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+        """Handle mouse release events for vertex dragging.
+
+        Args:
+            event: Mouse event.
+        """
+        if event.button() == QtCore.Qt.MouseButton.LeftButton and self._dragging_vertex is not None:
+            # End vertex dragging
+            self._dragging_vertex = None
+            self._drag_start_pos = None
+            self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+
+        super().mouseReleaseEvent(event)
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         """Handle resize event to maintain aspect ratio.
