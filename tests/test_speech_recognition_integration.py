@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Integration test for voice recognition with live preview and similarity matching.
+"""Integration test for speech recognition with live preview and similarity matching.
 
-This script provides a GUI application to test the VoiceRecognizer class with
+This script provides a GUI application to test the SpeechRecognizer class with
 real-time speech recognition and string similarity comparison.
 """
 
@@ -43,8 +43,8 @@ python_path = os.path.join(root_dir_path, "python")
 if python_path not in sys.path:
     sys.path.append(python_path)
 
-from ttga.voice_recognition import (  # noqa: E402
-    VoiceRecognizer,
+from ttga.speech_recognition import (  # noqa: E402
+    SpeechRecognizer,
     get_audio_input_devices,
     string_similarity
 )
@@ -60,8 +60,8 @@ REFERENCE_STRINGS = [
 ]
 
 
-class VoiceRecognitionTestWindow(QMainWindow):
-    """Main window for testing VoiceRecognizer with similarity matching."""
+class SpeechRecognitionTestWindow(QMainWindow):
+    """Main window for testing SpeechRecognizer with similarity matching."""
 
     def __init__(self, available_models: list[str], default_model_index: int = 0) -> None:
         """Initialize the test window.
@@ -75,11 +75,11 @@ class VoiceRecognitionTestWindow(QMainWindow):
         self.available_models: list[str] = available_models
         self.default_model_index: int = default_model_index
         self.vosk_models_path: str = os.path.join(root_dir_path, "vosk_models")
-        self.voice_recognizer: VoiceRecognizer | None = None
+        self.speech_recognizer: SpeechRecognizer | None = None
         self.similarity_spinboxes: list[QDoubleSpinBox] = []
         self.threshold_spinbox: QDoubleSpinBox | None = None
 
-        self.setWindowTitle("Voice Recognition Integration Test")
+        self.setWindowTitle("Speech Recognition Integration Test")
         self.setMinimumSize(800, 600)
 
         self._setup_ui()
@@ -248,11 +248,11 @@ class VoiceRecognitionTestWindow(QMainWindow):
             spinbox.setPalette(palette)
 
     def _start_recognizer(self) -> None:
-        """Start voice recognizer with current model and device selection."""
+        """Start speech recognizer with current model and device selection."""
         # Stop existing recognizer
-        if self.voice_recognizer is not None:
-            self.voice_recognizer.stop()
-            self.voice_recognizer = None
+        if self.speech_recognizer is not None:
+            self.speech_recognizer.stop()
+            self.speech_recognizer = None
 
         # Get selected model
         model_name = self.model_combo.currentText()
@@ -268,18 +268,18 @@ class VoiceRecognitionTestWindow(QMainWindow):
 
         # Start new recognizer with selected model and device
         try:
-            self.voice_recognizer = VoiceRecognizer(
+            self.speech_recognizer = SpeechRecognizer(
                 model_path=model_path,
                 device_index=device_index
             )
-            self.voice_recognizer.partial_result.connect(self._on_partial_result)
-            self.voice_recognizer.final_result.connect(self._on_final_result)
-            self.voice_recognizer.error_occurred.connect(self._on_error_occurred)
+            self.speech_recognizer.partial_result.connect(self._on_partial_result)
+            self.speech_recognizer.final_result.connect(self._on_final_result)
+            self.speech_recognizer.error_occurred.connect(self._on_error_occurred)
 
-            self.voice_recognizer.start()
-            print(f"Started voice recognition with model '{model_name}' on device {device_index}")
+            self.speech_recognizer.start()
+            print(f"Started speech recognition with model '{model_name}' on device {device_index}")
         except Exception as e:
-            print(f"Error starting voice recognizer: {e}")
+            print(f"Error starting speech recognizer: {e}")
             self.final_result_edit.setText(f"ERROR: {e}")
 
     @Slot(int)
@@ -326,7 +326,7 @@ class VoiceRecognitionTestWindow(QMainWindow):
         Args:
             error_msg: The error message string.
         """
-        print(f"Voice Recognition Error: {error_msg}")
+        print(f"Speech Recognition Error: {error_msg}")
 
     @Slot(float)
     def _on_threshold_changed(self, value: float) -> None:
@@ -347,8 +347,8 @@ class VoiceRecognitionTestWindow(QMainWindow):
         Args:
             event: The close event.
         """
-        if self.voice_recognizer is not None:
-            self.voice_recognizer.stop()
+        if self.speech_recognizer is not None:
+            self.speech_recognizer.stop()
 
         event.accept()
 
@@ -418,7 +418,7 @@ def main() -> None:
 
     app = QApplication(sys.argv)
 
-    window = VoiceRecognitionTestWindow(
+    window = SpeechRecognitionTestWindow(
         available_models=available_models,
         default_model_index=default_model_index
     )
