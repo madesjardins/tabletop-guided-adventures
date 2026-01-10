@@ -115,3 +115,115 @@ class ZoneManager(QtCore.QObject):
         zone_names = list(self._zones.keys())
         for name in zone_names:
             self.remove_zone(name)
+
+    def get_zones_with_camera_mapping(self, camera_name: str) -> list[Zone]:
+        """Get all zones that have camera mapping enabled for the specified camera.
+
+        Args:
+            camera_name: Name of the camera to filter by.
+
+        Returns:
+            List of zones with camera mapping for the specified camera.
+        """
+        zones = []
+        for zone in self._zones.values():
+            if (zone.camera_mapping and
+                    zone.camera_mapping.enabled and
+                    zone.camera_mapping.camera_name == camera_name):
+                zones.append(zone)
+        return zones
+
+    def get_zones_with_projector_mapping(self, projector_name: str) -> list[Zone]:
+        """Get all zones that have projector mapping enabled for the specified projector.
+
+        Args:
+            projector_name: Name of the projector to filter by.
+
+        Returns:
+            List of zones with projector mapping for the specified projector.
+        """
+        zones = []
+        for zone in self._zones.values():
+            if (zone.projector_mapping and
+                    zone.projector_mapping.enabled and
+                    zone.projector_mapping.projector_name == projector_name):
+                zones.append(zone)
+        return zones
+
+    def find_vertex_at_position(self, camera_name: str, x: int, y: int, max_distance: int = 7) -> tuple[Zone, int] | None:
+        """Find the closest vertex to a click position for zones with unlocked vertices.
+
+        Args:
+            camera_name: Name of the camera.
+            x: X coordinate of the click in camera frame pixels.
+            y: Y coordinate of the click in camera frame pixels.
+            max_distance: Maximum distance in pixels to consider (default: VERTEX_RADIUS).
+
+        Returns:
+            Tuple of (Zone, vertex_index) if found, None otherwise.
+            If multiple vertices are within max_distance, returns the closest one.
+        """
+        import math
+
+        closest_zone = None
+        closest_vertex_idx = -1
+        closest_distance = float('inf')
+
+        # Check all zones with camera mapping enabled for this camera
+        for zone in self.get_zones_with_camera_mapping(camera_name):
+            # Skip if vertices are locked
+            if zone.camera_mapping.lock_vertices:
+                continue
+
+            # Check each vertex
+            for idx, (vx, vy) in enumerate(zone.camera_mapping.vertices):
+                distance = math.sqrt((x - vx) ** 2 + (y - vy) ** 2)
+
+                # Check if within max_distance and closer than previous best
+                if distance <= max_distance and distance < closest_distance:
+                    closest_distance = distance
+                    closest_zone = zone
+                    closest_vertex_idx = idx
+
+        if closest_zone is not None:
+            return (closest_zone, closest_vertex_idx)
+        return None
+
+    def find_projector_vertex_at_position(self, projector_name: str, x: int, y: int, max_distance: int = 7) -> tuple[Zone, int] | None:
+        """Find the closest vertex to a click position for zones with unlocked projector vertices.
+
+        Args:
+            projector_name: Name of the projector.
+            x: X coordinate of the click in projector frame pixels.
+            y: Y coordinate of the click in projector frame pixels.
+            max_distance: Maximum distance in pixels to consider (default: VERTEX_RADIUS).
+
+        Returns:
+            Tuple of (Zone, vertex_index) if found, None otherwise.
+            If multiple vertices are within max_distance, returns the closest one.
+        """
+        import math
+
+        closest_zone = None
+        closest_vertex_idx = -1
+        closest_distance = float('inf')
+
+        # Check all zones with projector mapping enabled for this projector
+        for zone in self.get_zones_with_projector_mapping(projector_name):
+            # Skip if vertices are locked
+            if zone.projector_mapping.lock_vertices:
+                continue
+
+            # Check each vertex
+            for idx, (vx, vy) in enumerate(zone.projector_mapping.vertices):
+                distance = math.sqrt((x - vx) ** 2 + (y - vy) ** 2)
+
+                # Check if within max_distance and closer than previous best
+                if distance <= max_distance and distance < closest_distance:
+                    closest_distance = distance
+                    closest_zone = zone
+                    closest_vertex_idx = idx
+
+        if closest_zone is not None:
+            return (closest_zone, closest_vertex_idx)
+        return None

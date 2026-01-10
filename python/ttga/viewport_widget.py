@@ -32,7 +32,12 @@ class ViewportWidget(QtWidgets.QLabel):
 
     This widget displays the selected camera feed(s) and handles
     rendering of the video stream with configurable refresh rate.
+
+    Signals:
+        vertex_updated: Emitted when a vertex is updated via dragging (zone_name: str).
     """
+
+    vertex_updated = QtCore.Signal(str)
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         """Initialize the viewport widget.
@@ -56,6 +61,14 @@ class ViewportWidget(QtWidgets.QLabel):
         # Callback to get frames from selected cameras
         self._get_frames_callback: Callable[[], list[np.ndarray]] | None = None
         self._get_camera_ids_callback: Callable[[], list[int]] | None = None
+        self._get_camera_names_callback: Callable[[], list[str]] | None = None
+
+        # Zone manager reference for overlay compositing
+        self._zone_manager = None
+
+        # Vertex dragging state
+        self._dragging_vertex: tuple | None = None  # (zone, vertex_idx, camera_name)
+        self._drag_start_pos: tuple[int, int] | None = None
 
         # Current refresh rate (fps)
         self._fps = 30
@@ -80,15 +93,25 @@ class ViewportWidget(QtWidgets.QLabel):
         # Enable mouse tracking for wheel events
         self.setMouseTracking(True)
 
-    def set_get_frames_callback(self, callback: Callable[[], list[np.ndarray]], get_camera_ids_callback: Callable[[], list[int]] | None = None) -> None:
+    def set_get_frames_callback(self, callback: Callable[[], list[np.ndarray]], get_camera_ids_callback: Callable[[], list[int]] | None = None, get_camera_names_callback: Callable[[], list[str]] | None = None) -> None:
         """Set the callback function to get frames from selected cameras.
 
         Args:
             callback: Function that returns list of frames from selected cameras.
             get_camera_ids_callback: Optional function that returns list of camera IDs for selection tracking.
+            get_camera_names_callback: Optional function that returns list of camera names for zone overlay.
         """
         self._get_frames_callback = callback
         self._get_camera_ids_callback = get_camera_ids_callback
+        self._get_camera_names_callback = get_camera_names_callback
+
+    def set_zone_manager(self, zone_manager) -> None:
+        """Set the zone manager for overlay compositing.
+
+        Args:
+            zone_manager: ZoneManager instance.
+        """
+        self._zone_manager = zone_manager
 
     def set_fps(self, fps: int) -> None:
         """Set the viewport refresh rate.
@@ -146,11 +169,72 @@ class ViewportWidget(QtWidgets.QLabel):
             self.reset_zoom()
             self._last_camera_ids = current_camera_ids.copy()
 
+        # Composite zone overlays on frames before processing
+        frames_with_overlays = self._composite_zone_overlays(valid_frames)
+
         # Compose frames into grid
-        composed_frame = self._compose_frames(valid_frames)
+        composed_frame = self._compose_frames(frames_with_overlays)
 
         # Convert to QPixmap and display
         self._display_frame(composed_frame)
+
+    def _composite_zone_overlays(self, frames: list[np.ndarray]) -> list[np.ndarray]:
+        """Composite zone overlays on camera frames.
+
+        Args:
+            frames: List of camera frames.
+
+        Returns:
+            List of frames with zone overlays composited.
+        """
+        if self._zone_manager is None or self._get_camera_names_callback is None:
+            return frames
+
+        # Get camera names
+        camera_names = self._get_camera_names_callback()
+        if len(camera_names) != len(frames):
+            return frames
+
+        result_frames = []
+        for frame, camera_name in zip(frames, camera_names):
+            # Get zones with camera mapping for this camera
+            zones = self._zone_manager.get_zones_with_camera_mapping(camera_name)
+
+            if not zones:
+                result_frames.append(frame)
+                continue
+
+            # Collect overlays first to avoid unnecessary frame copy
+            overlays_to_composite = []
+            for zone in zones:
+                overlay_data = zone.get_camera_overlay(frame.shape)
+                if overlay_data is not None:
+                    overlays_to_composite.append(overlay_data)
+
+            # Only copy frame if we have overlays to composite
+            if overlays_to_composite:
+                composited = frame.copy()
+                for overlay_data in overlays_to_composite:
+                    # Unpack ROI overlay data
+                    overlay, x, y, width, height = overlay_data
+
+                    # Extract the ROI from the frame
+                    roi = composited[y:y + height, x:x + width]
+
+                    # Composite BGRA overlay onto BGR ROI
+                    # Extract alpha channel
+                    alpha = overlay[:, :, 3:4] / 255.0
+
+                    # Blend overlay onto ROI
+                    blended_roi = (roi * (1 - alpha) + overlay[:, :, :3] * alpha).astype(np.uint8)
+
+                    # Put the blended ROI back into the frame
+                    composited[y:y + height, x:x + width] = blended_roi
+                result_frames.append(composited)
+            else:
+                result_frames.append(frame)
+
+        return result_frames
 
     def _compose_frames(self, frames: list[np.ndarray]) -> np.ndarray:
         """Compose multiple frames into a single grid layout.
@@ -555,18 +639,171 @@ class ViewportWidget(QtWidgets.QLabel):
 
         return cell_idx
 
+    def _viewport_to_frame_coords(self, viewport_x: int, viewport_y: int, cell_idx: int, frame_shape: tuple) -> tuple[int, int] | None:
+        """Convert viewport coordinates to original frame coordinates.
+
+        Args:
+            viewport_x: X coordinate in viewport.
+            viewport_y: Y coordinate in viewport.
+            cell_idx: Cell index.
+            frame_shape: Shape of the original frame (height, width, channels).
+
+        Returns:
+            Tuple of (x, y) in original frame coordinates, or None if invalid.
+        """
+        if self._cell_width == 0 or self._cell_height == 0:
+            return None
+
+        # Get cell position
+        cell_row = cell_idx // self._current_cols
+        cell_col = cell_idx % self._current_cols
+        cell_x = cell_col * self._cell_width
+        cell_y = cell_row * self._cell_height
+
+        # Position within cell
+        rel_x = viewport_x - cell_x
+        rel_y = viewport_y - cell_y
+
+        # Get frame dimensions
+        frame_h, frame_w = frame_shape[:2]
+
+        # Account for zoom/pan if active
+        if cell_idx in self._zoom_states:
+            zoom_state = self._zoom_states[cell_idx]
+            zoom_factor = zoom_state['zoom']
+            center_x = zoom_state['center_x']
+            center_y = zoom_state['center_y']
+            pan_x = zoom_state.get('pan_x', 0.0)
+            pan_y = zoom_state.get('pan_y', 0.0)
+
+            # Calculate the visible region in the original frame
+            crop_w = int(frame_w / zoom_factor)
+            crop_h = int(frame_h / zoom_factor)
+
+            # Center with pan offset
+            center_x_px = center_x * frame_w + pan_x * frame_w
+            center_y_px = center_y * frame_h + pan_y * frame_h
+
+            # Crop coordinates
+            x1 = int(center_x_px - crop_w / 2)
+            y1 = int(center_y_px - crop_h / 2)
+            x1 = max(0, min(x1, frame_w - crop_w))
+            y1 = max(0, min(y1, frame_h - crop_h))
+
+            # Calculate aspect-preserving resize dimensions
+            aspect = frame_w / frame_h
+            cell_aspect = self._cell_width / self._cell_height
+
+            if aspect > cell_aspect:
+                new_w = self._cell_width
+                new_h = int(self._cell_width / aspect)
+            else:
+                new_h = self._cell_height
+                new_w = int(self._cell_height * aspect)
+
+            # Account for padding
+            x_offset = (self._cell_width - new_w) // 2
+            y_offset = (self._cell_height - new_h) // 2
+
+            # Check if click is within the actual image area
+            if rel_x < x_offset or rel_x >= x_offset + new_w:
+                return None
+            if rel_y < y_offset or rel_y >= y_offset + new_h:
+                return None
+
+            # Normalize to cropped region
+            norm_x = (rel_x - x_offset) / new_w
+            norm_y = (rel_y - y_offset) / new_h
+
+            # Map to original frame coordinates
+            frame_x = int(x1 + norm_x * crop_w)
+            frame_y = int(y1 + norm_y * crop_h)
+
+        else:
+            # No zoom - calculate aspect-preserving resize
+            aspect = frame_w / frame_h
+            cell_aspect = self._cell_width / self._cell_height
+
+            if aspect > cell_aspect:
+                new_w = self._cell_width
+                new_h = int(self._cell_width / aspect)
+            else:
+                new_h = self._cell_height
+                new_w = int(self._cell_height * aspect)
+
+            # Account for padding
+            x_offset = (self._cell_width - new_w) // 2
+            y_offset = (self._cell_height - new_h) // 2
+
+            # Check if click is within the actual image area
+            if rel_x < x_offset or rel_x >= x_offset + new_w:
+                return None
+            if rel_y < y_offset or rel_y >= y_offset + new_h:
+                return None
+
+            # Normalize and map to original frame
+            norm_x = (rel_x - x_offset) / new_w
+            norm_y = (rel_y - y_offset) / new_h
+            frame_x = int(norm_x * frame_w)
+            frame_y = int(norm_y * frame_h)
+
+        # Clamp to frame bounds
+        frame_x = max(0, min(frame_x, frame_w - 1))
+        frame_y = max(0, min(frame_y, frame_h - 1))
+
+        return (frame_x, frame_y)
+
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
-        """Handle mouse press events for panning.
+        """Handle mouse press events for panning and vertex dragging.
 
         Args:
             event: Mouse event.
         """
-        if event.button() == QtCore.Qt.MouseButton.MiddleButton:
-            # Start panning
-            pos = event.position()
-            mouse_x = int(pos.x())
-            mouse_y = int(pos.y())
+        pos = event.position()
+        mouse_x = int(pos.x())
+        mouse_y = int(pos.y())
 
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            # Check for vertex dragging
+            if (self._zone_manager is not None and
+                    self._get_frames_callback is not None and
+                    self._get_camera_names_callback is not None):
+
+                # Get frames and camera names
+                frames = self._get_frames_callback()
+                camera_names = self._get_camera_names_callback()
+
+                if frames and camera_names and len(frames) == len(camera_names):
+                    # Determine which cell was clicked
+                    cell_idx = self._get_cell_at_position(mouse_x, mouse_y)
+
+                    if 0 <= cell_idx < len(frames):
+                        frame = frames[cell_idx]
+                        camera_name = camera_names[cell_idx]
+
+                        if frame is not None:
+                            # Convert viewport coords to frame coords
+                            frame_coords = self._viewport_to_frame_coords(mouse_x, mouse_y, cell_idx, frame.shape)
+
+                            if frame_coords is not None:
+                                from .constants import VERTEX_RADIUS
+                                frame_x, frame_y = frame_coords
+
+                                # Find vertex at this position
+                                result = self._zone_manager.find_vertex_at_position(
+                                    camera_name, frame_x, frame_y, VERTEX_RADIUS
+                                )
+
+                                if result is not None:
+                                    zone, vertex_idx = result
+                                    self._dragging_vertex = (zone, vertex_idx, camera_name, cell_idx)
+                                    self._drag_start_pos = (mouse_x, mouse_y)
+                                    self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
+                                    event.accept()
+                                    return
+
+        elif event.button() == QtCore.Qt.MouseButton.MiddleButton:
+            # Start panning
             cell_idx = self._get_cell_at_position(mouse_x, mouse_y)
             if cell_idx >= 0:
                 # Only pan if this cell has zoom
@@ -581,16 +818,46 @@ class ViewportWidget(QtWidgets.QLabel):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
-        """Handle mouse move events for panning.
+        """Handle mouse move events for panning and vertex dragging.
 
         Args:
             event: Mouse event.
         """
-        if self._is_panning and self._pan_start_pos is not None:
-            pos = event.position()
-            mouse_x = int(pos.x())
-            mouse_y = int(pos.y())
+        pos = event.position()
+        mouse_x = int(pos.x())
+        mouse_y = int(pos.y())
 
+        # Handle vertex dragging
+        if self._dragging_vertex is not None and self._get_frames_callback is not None:
+            zone, vertex_idx, camera_name, cell_idx = self._dragging_vertex
+
+            # Get frames to access frame shape
+            frames = self._get_frames_callback()
+            if frames and 0 <= cell_idx < len(frames):
+                frame = frames[cell_idx]
+                if frame is not None:
+                    # Convert viewport coords to frame coords
+                    frame_coords = self._viewport_to_frame_coords(mouse_x, mouse_y, cell_idx, frame.shape)
+
+                    if frame_coords is not None:
+                        frame_x, frame_y = frame_coords
+
+                        # Update vertex position
+                        vertices = list(zone.camera_mapping.vertices)
+                        vertices[vertex_idx] = (frame_x, frame_y)
+                        zone.camera_mapping.vertices = vertices
+
+                        # Invalidate overlay to force regeneration
+                        zone.camera_mapping.invalidate_overlay()
+
+                        # Emit signal to update UI
+                        self.vertex_updated.emit(zone.name)
+
+                        event.accept()
+                        return
+
+        # Handle panning
+        if self._is_panning and self._pan_start_pos is not None:
             # Calculate delta
             dx = mouse_x - self._pan_start_pos[0]
             dy = mouse_y - self._pan_start_pos[1]
@@ -618,11 +885,19 @@ class ViewportWidget(QtWidgets.QLabel):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
-        """Handle mouse release events for panning.
+        """Handle mouse release events for panning and vertex dragging.
 
         Args:
             event: Mouse event.
         """
+        if event.button() == QtCore.Qt.MouseButton.LeftButton and self._dragging_vertex is not None:
+            # End vertex dragging
+            self._dragging_vertex = None
+            self._drag_start_pos = None
+            self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+
         if event.button() == QtCore.Qt.MouseButton.MiddleButton and self._is_panning:
             self._is_panning = False
             self._pan_start_pos = None

@@ -78,8 +78,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # Set up viewport callbacks and start timer
         self.viewport.set_get_frames_callback(
             self._get_selected_camera_frames,
-            self._get_selected_camera_ids
+            self._get_selected_camera_ids,
+            self._get_selected_camera_names
         )
+        self.viewport.set_zone_manager(self.core.zone_manager)
+        self.viewport.vertex_updated.connect(self._on_viewport_vertex_updated)
         self.viewport.start()
 
     def _setup_menu_bar(self) -> None:
@@ -646,8 +649,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Load camera mapping
         self.zone_camera_enabled_checkbox.blockSignals(True)
         if zone.camera_mapping:
-            self.zone_camera_enabled_checkbox.setChecked(True)
-            self.camera_section.setVisible(True)
+            # Set checkbox based on enabled flag
+            self.zone_camera_enabled_checkbox.setChecked(zone.camera_mapping.enabled)
+            self.camera_section.setVisible(zone.camera_mapping.enabled)
             self.zone_camera_mapping_group.setVisible(True)
 
             self._update_camera_combo()
@@ -697,8 +701,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Load projector mapping
         self.zone_projector_enabled_checkbox.blockSignals(True)
         if zone.projector_mapping:
-            self.zone_projector_enabled_checkbox.setChecked(True)
-            self.projector_section.setVisible(True)
+            # Set checkbox based on enabled flag
+            self.zone_projector_enabled_checkbox.setChecked(zone.projector_mapping.enabled)
+            self.projector_section.setVisible(zone.projector_mapping.enabled)
             self.zone_projector_mapping_group.setVisible(True)
 
             self._update_projector_combo()
@@ -765,6 +770,12 @@ class MainWindow(QtWidgets.QMainWindow):
             if index >= 0:
                 self.zone_camera_combo.setCurrentIndex(index)
 
+        # If no camera was selected before and combo has items, update zone with first camera
+        zone = self._get_selected_zone()
+        if zone and zone.camera_mapping:
+            if not zone.camera_mapping.camera_name and self.zone_camera_combo.count() > 0:
+                zone.camera_mapping.camera_name = self.zone_camera_combo.currentText()
+
     def _update_projector_combo(self) -> None:
         """Update projector combo box with available projectors."""
         current = self.zone_projector_combo.currentText()
@@ -779,6 +790,12 @@ class MainWindow(QtWidgets.QMainWindow):
             index = self.zone_projector_combo.findText(current)
             if index >= 0:
                 self.zone_projector_combo.setCurrentIndex(index)
+
+        # If no projector was selected before and combo has items, update zone with first projector
+        zone = self._get_selected_zone()
+        if zone and zone.projector_mapping:
+            if not zone.projector_mapping.projector_name and self.zone_projector_combo.count() > 0:
+                zone.projector_mapping.projector_name = self.zone_projector_combo.currentText()
 
     def _update_camera_vertices_enabled(self) -> None:
         """Enable/disable camera vertex spinboxes based on lock state."""
@@ -861,6 +878,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         enabled = state == QtCore.Qt.CheckState.Checked.value
         self.camera_section.setVisible(enabled)
+        if enabled:
+            self.zone_camera_mapping_group.setVisible(True)
 
         if enabled:
             # Refresh combo box with available cameras
@@ -869,10 +888,16 @@ class MainWindow(QtWidgets.QMainWindow):
             if not zone.camera_mapping:
                 # Create new camera mapping with default values
                 camera_name = self.zone_camera_combo.currentText() if self.zone_camera_combo.count() > 0 else ""
-                if camera_name:
-                    zone.camera_mapping = CameraMapping(camera_name=camera_name)
-        elif not enabled:
-            zone.camera_mapping = None
+                zone.camera_mapping = CameraMapping(camera_name=camera_name, enabled=True)
+                # Load the new mapping into UI
+                self._load_zone_into_ui(zone)
+            else:
+                # Enable existing mapping
+                zone.camera_mapping.enabled = True
+        else:
+            # Disable mapping but keep the data
+            if zone.camera_mapping:
+                zone.camera_mapping.enabled = False
 
     @QtCore.Slot(str)
     def _on_zone_camera_changed(self, camera_name: str) -> None:
@@ -892,6 +917,89 @@ class MainWindow(QtWidgets.QMainWindow):
                 (self.zone_camera_p2_x.value(), self.zone_camera_p2_y.value()),
                 (self.zone_camera_p3_x.value(), self.zone_camera_p3_y.value())
             ]
+            zone.camera_mapping.invalidate_overlay()
+
+    @QtCore.Slot(str)
+    def _on_viewport_vertex_updated(self, zone_name: str) -> None:
+        """Handle vertex update from viewport dragging.
+
+        Args:
+            zone_name: Name of the zone whose vertex was updated.
+        """
+        # Only update UI if this is the currently selected zone
+        selected_zone = self._get_selected_zone()
+        if selected_zone and selected_zone.name == zone_name:
+            # Block signals to prevent triggering _on_zone_camera_vertex_changed
+            self.zone_camera_p0_x.blockSignals(True)
+            self.zone_camera_p0_y.blockSignals(True)
+            self.zone_camera_p1_x.blockSignals(True)
+            self.zone_camera_p1_y.blockSignals(True)
+            self.zone_camera_p2_x.blockSignals(True)
+            self.zone_camera_p2_y.blockSignals(True)
+            self.zone_camera_p3_x.blockSignals(True)
+            self.zone_camera_p3_y.blockSignals(True)
+
+            # Update spinbox values from zone
+            vertices = selected_zone.camera_mapping.vertices
+            self.zone_camera_p0_x.setValue(vertices[0][0])
+            self.zone_camera_p0_y.setValue(vertices[0][1])
+            self.zone_camera_p1_x.setValue(vertices[1][0])
+            self.zone_camera_p1_y.setValue(vertices[1][1])
+            self.zone_camera_p2_x.setValue(vertices[2][0])
+            self.zone_camera_p2_y.setValue(vertices[2][1])
+            self.zone_camera_p3_x.setValue(vertices[3][0])
+            self.zone_camera_p3_y.setValue(vertices[3][1])
+
+            # Unblock signals
+            self.zone_camera_p0_x.blockSignals(False)
+            self.zone_camera_p0_y.blockSignals(False)
+            self.zone_camera_p1_x.blockSignals(False)
+            self.zone_camera_p1_y.blockSignals(False)
+            self.zone_camera_p2_x.blockSignals(False)
+            self.zone_camera_p2_y.blockSignals(False)
+            self.zone_camera_p3_x.blockSignals(False)
+            self.zone_camera_p3_y.blockSignals(False)
+
+    @QtCore.Slot(str)
+    def _on_projector_viewport_vertex_updated(self, zone_name: str) -> None:
+        """Handle vertex update from projector viewport dragging.
+
+        Args:
+            zone_name: Name of the zone whose vertex was updated.
+        """
+        # Only update UI if this is the currently selected zone
+        selected_zone = self._get_selected_zone()
+        if selected_zone and selected_zone.name == zone_name:
+            # Block signals to prevent triggering _on_zone_projector_vertex_changed
+            self.zone_projector_p0_x.blockSignals(True)
+            self.zone_projector_p0_y.blockSignals(True)
+            self.zone_projector_p1_x.blockSignals(True)
+            self.zone_projector_p1_y.blockSignals(True)
+            self.zone_projector_p2_x.blockSignals(True)
+            self.zone_projector_p2_y.blockSignals(True)
+            self.zone_projector_p3_x.blockSignals(True)
+            self.zone_projector_p3_y.blockSignals(True)
+
+            # Update spinbox values from zone
+            vertices = selected_zone.projector_mapping.vertices
+            self.zone_projector_p0_x.setValue(vertices[0][0])
+            self.zone_projector_p0_y.setValue(vertices[0][1])
+            self.zone_projector_p1_x.setValue(vertices[1][0])
+            self.zone_projector_p1_y.setValue(vertices[1][1])
+            self.zone_projector_p2_x.setValue(vertices[2][0])
+            self.zone_projector_p2_y.setValue(vertices[2][1])
+            self.zone_projector_p3_x.setValue(vertices[3][0])
+            self.zone_projector_p3_y.setValue(vertices[3][1])
+
+            # Unblock signals
+            self.zone_projector_p0_x.blockSignals(False)
+            self.zone_projector_p0_y.blockSignals(False)
+            self.zone_projector_p1_x.blockSignals(False)
+            self.zone_projector_p1_y.blockSignals(False)
+            self.zone_projector_p2_x.blockSignals(False)
+            self.zone_projector_p2_y.blockSignals(False)
+            self.zone_projector_p3_x.blockSignals(False)
+            self.zone_projector_p3_y.blockSignals(False)
 
     @QtCore.Slot(int)
     def _on_zone_draw_locked_borders_changed(self, state: int) -> None:
@@ -899,6 +1007,11 @@ class MainWindow(QtWidgets.QMainWindow):
         zone = self._get_selected_zone()
         if zone:
             zone.draw_locked_borders = state == QtCore.Qt.CheckState.Checked.value
+            # Invalidate overlays since border visibility changed
+            if zone.camera_mapping:
+                zone.camera_mapping.invalidate_overlay()
+            if zone.projector_mapping:
+                zone.projector_mapping.invalidate_overlay()
 
     @QtCore.Slot(int)
     def _on_zone_camera_lock_vertices_changed(self, state: int) -> None:
@@ -907,6 +1020,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if zone and zone.camera_mapping:
             zone.camera_mapping.lock_vertices = state == QtCore.Qt.CheckState.Checked.value
             self._update_camera_vertices_enabled()
+            # Invalidate overlay since edge visibility may have changed
+            zone.camera_mapping.invalidate_overlay()
 
     @QtCore.Slot(int)
     def _on_zone_projector_enabled_changed(self, state: int) -> None:
@@ -919,6 +1034,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         enabled = state == QtCore.Qt.CheckState.Checked.value
         self.projector_section.setVisible(enabled)
+        if enabled:
+            self.zone_projector_mapping_group.setVisible(True)
 
         if enabled:
             # Refresh combo box with available projectors
@@ -927,10 +1044,16 @@ class MainWindow(QtWidgets.QMainWindow):
             if not zone.projector_mapping:
                 # Create new projector mapping with default values
                 projector_name = self.zone_projector_combo.currentText() if self.zone_projector_combo.count() > 0 else ""
-                if projector_name:
-                    zone.projector_mapping = ProjectorMapping(projector_name=projector_name)
-        elif not enabled:
-            zone.projector_mapping = None
+                zone.projector_mapping = ProjectorMapping(projector_name=projector_name, enabled=True)
+                # Load the new mapping into UI
+                self._load_zone_into_ui(zone)
+            else:
+                # Enable existing mapping
+                zone.projector_mapping.enabled = True
+        else:
+            # Disable mapping but keep the data
+            if zone.projector_mapping:
+                zone.projector_mapping.enabled = False
 
     @QtCore.Slot(str)
     def _on_zone_projector_changed(self, projector_name: str) -> None:
@@ -950,6 +1073,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 (self.zone_projector_p2_x.value(), self.zone_projector_p2_y.value()),
                 (self.zone_projector_p3_x.value(), self.zone_projector_p3_y.value())
             ]
+            zone.projector_mapping.invalidate_overlay()
 
     @QtCore.Slot(int)
     def _on_zone_projector_lock_vertices_changed(self, state: int) -> None:
@@ -957,6 +1081,7 @@ class MainWindow(QtWidgets.QMainWindow):
         zone = self._get_selected_zone()
         if zone and zone.projector_mapping:
             zone.projector_mapping.lock_vertices = state == QtCore.Qt.CheckState.Checked.value
+            zone.projector_mapping.invalidate_overlay()
             self._update_projector_vertices_enabled()
 
     def _create_camera_tabs(self) -> QtWidgets.QTabWidget:
@@ -1383,6 +1508,15 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         selected_items = self.camera_list.selectedItems()
         return [hash(item.text()) for item in selected_items]
+
+    def _get_selected_camera_names(self) -> list[str]:
+        """Get names of selected cameras for zone overlay compositing.
+
+        Returns:
+            List of camera names.
+        """
+        selected_items = self.camera_list.selectedItems()
+        return [item.text() for item in selected_items]
 
     @QtCore.Slot()
     def _on_add_camera(self) -> None:
@@ -1866,6 +2000,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Create and show projector dialog automatically
         dialog = ProjectorDialog(projector.name, projector.resolution, self)
+        dialog.viewport.set_zone_manager(self.core.zone_manager)
+        dialog.viewport.vertex_updated.connect(self._on_projector_viewport_vertex_updated)
         projector.dialog = dialog
         dialog.show()
 
@@ -1913,6 +2049,8 @@ class MainWindow(QtWidgets.QMainWindow):
             # If dialog doesn't exist or was closed, create and show it
             if projector.dialog is None or not projector.dialog.isVisible():
                 dialog = ProjectorDialog(projector.name, projector.resolution, self)
+                dialog.viewport.set_zone_manager(self.core.zone_manager)
+                dialog.viewport.vertex_updated.connect(self._on_projector_viewport_vertex_updated)
                 projector.dialog = dialog
                 dialog.show()
 
