@@ -12,11 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Voice recognition module using Vosk for speech-to-text.
+"""Speech recognition module using Vosk for speech-to-text.
 
-This module provides voice recognition capabilities using the Vosk library,
-along with string similarity functions for comparing recognized text.
-"""
+This module provides speech recognition capabilities using the Vosk library,
+along with string similarity functions for comparing recognized text."""
 
 from __future__ import annotations
 
@@ -152,8 +151,8 @@ def string_similarity(str1: str, str2: str) -> float:
     return (lev_sim + jac_sim) / 2.0
 
 
-class VoiceRecognizer(QObject):
-    """Voice recognition using Vosk speech-to-text.
+class SpeechRecognizer(QObject):
+    """Speech recognition using Vosk speech-to-text.
 
     This class captures audio from an input device and performs real-time
     speech recognition using Vosk. It emits signals for both partial results
@@ -165,7 +164,7 @@ class VoiceRecognizer(QObject):
         error_occurred: Emitted when an error occurs with error message.
 
     Example:
-        >>> recognizer = VoiceRecognizer(model_path="/path/to/vosk-model")
+        >>> recognizer = SpeechRecognizer(model_path="/path/to/vosk-model")
         >>> recognizer.partial_result.connect(lambda text: print(f"Partial: {text}"))
         >>> recognizer.final_result.connect(lambda text: print(f"Final: {text}"))
         >>> recognizer.start()
@@ -182,7 +181,7 @@ class VoiceRecognizer(QObject):
         sample_rate: int = 16000,
         parent: Optional[QObject] = None
     ) -> None:
-        """Initialize the voice recognizer.
+        """Initialize the speech recognizer.
 
         Args:
             model_path: Path to the Vosk model directory.
@@ -213,7 +212,7 @@ class VoiceRecognizer(QObject):
             raise Exception(f"Failed to load Vosk model from {model_path}: {e}")
 
     def start(self) -> None:
-        """Start voice recognition.
+        """Start speech recognition.
 
         Opens the audio input stream and begins processing audio data.
 
@@ -221,7 +220,7 @@ class VoiceRecognizer(QObject):
             RuntimeError: If recognition is already running.
         """
         if self._is_running:
-            raise RuntimeError("Voice recognition is already running")
+            raise RuntimeError("Speech recognition is already running")
 
         self._is_running = True
 
@@ -250,7 +249,7 @@ class VoiceRecognizer(QObject):
             self.error_occurred.emit(f"Failed to start audio stream: {e}")
 
     def stop(self) -> None:
-        """Stop voice recognition and release resources."""
+        """Stop speech recognition and release resources."""
         if not self._is_running:
             return
 
@@ -275,7 +274,7 @@ class VoiceRecognizer(QObject):
                 break
 
     def is_running(self) -> bool:
-        """Check if voice recognition is currently running.
+        """Check if speech recognition is currently running.
 
         Returns:
             True if running, False otherwise.
