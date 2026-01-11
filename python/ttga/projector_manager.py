@@ -39,12 +39,13 @@ class ProjectorManager(QtCore.QObject):
         super().__init__(parent)
         self._projectors: dict[str, Projector] = {}
 
-    def add_projector(self, name: str, resolution: tuple[int, int]) -> Projector:
+    def add_projector(self, name: str, resolution: tuple[int, int], fps: int = 15) -> Projector:
         """Add a new projector.
 
         Args:
             name: Unique name for the projector.
             resolution: Tuple of (width, height) for the projector resolution.
+            fps: Refresh rate in frames per second (default: 15).
 
         Returns:
             The created Projector instance.
@@ -56,6 +57,7 @@ class ProjectorManager(QtCore.QObject):
             raise ValueError(f"Projector '{name}' already exists")
 
         projector = Projector(name, resolution)
+        projector.set_fps(fps)
         self._projectors[name] = projector
         self.projector_added.emit(name)
         return projector
