@@ -56,6 +56,7 @@ class SoundMixer:
         _locks: Dictionary of threading locks for thread-safe channel operations.
         _running: Flag indicating if worker threads should continue running.
         _worker_threads: Dictionary of worker threads for each channel.
+        _output_device: Output device index (stored but not used by pygame).
 
     Example:
         >>> mixer = SoundMixer()
@@ -66,6 +67,7 @@ class SoundMixer:
 
     def __init__(
         self,
+        output_device: Optional[int] = None,
         frequency: int = 44100,
         size: int = -16,
         channels: int = 2,
@@ -74,6 +76,7 @@ class SoundMixer:
         """Initialize the sound mixer with pygame audio settings.
 
         Args:
+            output_device: Output device index (stored but not used by pygame).
             frequency: Audio sampling frequency in Hz. Default is 44100.
             size: Sample size in bits. Negative values indicate signed samples.
                 Default is -16 (16-bit signed).
@@ -82,6 +85,7 @@ class SoundMixer:
                 audio artifacts. Default is 512.
         """
         pygame.mixer.init(frequency=frequency, size=size, channels=channels, buffer=buffer)
+        self._output_device = output_device
 
         self._queues: dict[Channel, Queue[str]] = {
             Channel.MUSIC: Queue(),
@@ -106,6 +110,16 @@ class SoundMixer:
             Channel.EFFECT: False,
             Channel.VOICE: False
         }
+
+        self._volumes: dict[Channel, float] = {
+            Channel.MUSIC: 1.0,
+            Channel.EFFECT: 1.0,
+            Channel.VOICE: 1.0
+        }
+
+        # Set initial volumes
+        for channel in Channel:
+            self._pygame_channels[channel].set_volume(1.0)
 
         self._running: bool = True
         self._worker_threads: dict[Channel, threading.Thread] = {}
@@ -254,6 +268,66 @@ class SoundMixer:
             >>> queue_size = mixer.get_queue_size(Channel.EFFECT)
         """
         return self._queues[channel].qsize()
+
+    def set_volume(self, channel: Channel, volume: float) -> None:
+        """Set the volume for a specific channel.
+
+        Args:
+            channel: The audio channel to adjust.
+            volume: Volume level from 0.0 (silent) to 1.0 (full volume).
+
+        Raises:
+            ValueError: If volume is not between 0.0 and 1.0.
+
+        Example:
+            >>> mixer.set_volume(Channel.MUSIC, 0.5)
+        """
+        if not 0.0 <= volume <= 1.0:
+            raise ValueError(f"Volume must be between 0.0 and 1.0, got {volume}")
+
+        with self._locks[channel]:
+            self._volumes[channel] = volume
+            self._pygame_channels[channel].set_volume(volume)
+
+    def get_volume(self, channel: Channel) -> float:
+        """Get the current volume for a specific channel.
+
+        Args:
+            channel: The audio channel to query.
+
+        Returns:
+            Current volume level from 0.0 to 1.0.
+
+        Example:
+            >>> volume = mixer.get_volume(Channel.MUSIC)
+        """
+        with self._locks[channel]:
+            return self._volumes[channel]
+
+    def set_output_device(self, device_index: Optional[int]) -> None:
+        """Set the output device for audio playback.
+
+        Args:
+            device_index: Output device index (None for system default).
+
+        Note:
+            pygame.mixer does not support output device selection.
+            This method stores the value for configuration purposes only.
+            Audio will always play through the system default device.
+        """
+        self._output_device = device_index
+
+    def get_output_device(self) -> Optional[int]:
+        """Get the current output device index.
+
+        Returns:
+            Output device index (None if using system default).
+
+        Note:
+            This returns the stored value, but pygame.mixer always uses
+            the system default device regardless of this setting.
+        """
+        return self._output_device
 
     def shutdown(self) -> None:
         """Shutdown the mixer and clean up resources.

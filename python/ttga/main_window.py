@@ -280,34 +280,42 @@ class MainWindow(QtWidgets.QMainWindow):
         speech_recognition_widget = self._create_speech_recognition_widget()
         tabs.addTab(speech_recognition_widget, "Speech Recognition")
 
-        # Sound tab
-        sound_widget = QtWidgets.QWidget()
-        sound_layout = QtWidgets.QVBoxLayout(sound_widget)
-        sound_layout.addWidget(QtWidgets.QLabel("Sound settings will be added here"))
-        tabs.addTab(sound_widget, "Sound")
+        # Narrator tab
+        narrator_widget = self._create_narrator_widget()
+        tabs.addTab(narrator_widget, "Narrator")
 
         # Advanced tab
         advanced_widget = QtWidgets.QWidget()
         advanced_layout = QtWidgets.QVBoxLayout(advanced_widget)
 
-        # Viewport refresh rate
+        # Refresh rates
         refresh_form = QtWidgets.QFormLayout()
-        self.viewport_fps_spinbox = QtWidgets.QSpinBox()
-        self.viewport_fps_spinbox.setRange(5, 60)
-        self.viewport_fps_spinbox.setValue(30)
-        self.viewport_fps_spinbox.setSuffix(" fps")
-        self.viewport_fps_spinbox.valueChanged.connect(self._on_viewport_fps_changed)
-        refresh_form.addRow("Viewport Refresh Rate:", self.viewport_fps_spinbox)
+
+        self.viewports_fps_spinbox = QtWidgets.QSpinBox()
+        self.viewports_fps_spinbox.setRange(5, 60)
+        self.viewports_fps_spinbox.setValue(30)
+        self.viewports_fps_spinbox.setSuffix(" fps")
+        self.viewports_fps_spinbox.valueChanged.connect(self._on_viewports_fps_changed)
+        refresh_form.addRow("Viewports Refresh Rate:", self.viewports_fps_spinbox)
+
+        self.projectors_fps_spinbox = QtWidgets.QSpinBox()
+        self.projectors_fps_spinbox.setRange(5, 60)
+        self.projectors_fps_spinbox.setValue(15)
+        self.projectors_fps_spinbox.setSuffix(" fps")
+        self.projectors_fps_spinbox.valueChanged.connect(self._on_projectors_fps_changed)
+        refresh_form.addRow("Projectors Refresh Rate:", self.projectors_fps_spinbox)
+
+        self.qr_code_fps_spinbox = QtWidgets.QSpinBox()
+        self.qr_code_fps_spinbox.setRange(1, 30)
+        self.qr_code_fps_spinbox.setValue(5)
+        self.qr_code_fps_spinbox.setSuffix(" fps")
+        self.qr_code_fps_spinbox.valueChanged.connect(self._on_qr_code_fps_changed)
+        refresh_form.addRow("QR Code Refresh Rate:", self.qr_code_fps_spinbox)
+
         advanced_layout.addLayout(refresh_form)
 
         advanced_layout.addStretch()
         tabs.addTab(advanced_widget, "Advanced")
-
-        # Debug tab
-        debug_widget = QtWidgets.QWidget()
-        debug_layout = QtWidgets.QVBoxLayout(debug_widget)
-        debug_layout.addWidget(QtWidgets.QLabel("Debug information will be added here"))
-        tabs.addTab(debug_widget, "Debug")
 
         return tabs
 
@@ -699,6 +707,135 @@ class MainWindow(QtWidgets.QMainWindow):
         for device in devices:
             device_label = f"{device['index']}: {device['name']}"
             self.speech_device_combo.addItem(device_label, device['index'])
+
+    def _create_narrator_widget(self) -> QtWidgets.QWidget:
+        """Create the narrator widget for TTS and audio playback.
+
+        Returns:
+            Widget containing narrator controls.
+        """
+        widget = QtWidgets.QWidget()
+        main_layout = QtWidgets.QVBoxLayout(widget)
+
+        # Voice Configuration Group
+        voice_config_group = QtWidgets.QGroupBox("Voice Configuration")
+        voice_config_layout = QtWidgets.QFormLayout(voice_config_group)
+
+        # Voice model combo box
+        self.narrator_voice_combo = QtWidgets.QComboBox()
+        voice_config_layout.addRow("Voice Model:", self.narrator_voice_combo)
+
+        # Output device combo box
+        self.narrator_output_device_combo = QtWidgets.QComboBox()
+        voice_config_layout.addRow("Output Device:", self.narrator_output_device_combo)
+
+        main_layout.addWidget(voice_config_group)
+
+        # Channel Volume Controls Group
+        channels_group = QtWidgets.QGroupBox("Channel Volume Controls")
+        channels_layout = QtWidgets.QGridLayout(channels_group)
+
+        # Voice channel
+        channels_layout.addWidget(QtWidgets.QLabel("Voice:"), 0, 0)
+        self.narrator_voice_volume_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.narrator_voice_volume_slider.setRange(0, 100)
+        self.narrator_voice_volume_slider.setValue(100)
+        self.narrator_voice_volume_slider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        self.narrator_voice_volume_slider.setTickInterval(10)
+        channels_layout.addWidget(self.narrator_voice_volume_slider, 0, 1)
+        self.narrator_voice_volume_label = QtWidgets.QLabel("100%")
+        self.narrator_voice_volume_label.setMinimumWidth(50)
+        channels_layout.addWidget(self.narrator_voice_volume_label, 0, 2)
+        self.narrator_voice_test_button = QtWidgets.QPushButton("Test")
+        self.narrator_voice_test_button.setMaximumWidth(80)
+        channels_layout.addWidget(self.narrator_voice_test_button, 0, 3)
+
+        # Effect channel
+        channels_layout.addWidget(QtWidgets.QLabel("Effect:"), 1, 0)
+        self.narrator_effect_volume_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.narrator_effect_volume_slider.setRange(0, 100)
+        self.narrator_effect_volume_slider.setValue(100)
+        self.narrator_effect_volume_slider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        self.narrator_effect_volume_slider.setTickInterval(10)
+        channels_layout.addWidget(self.narrator_effect_volume_slider, 1, 1)
+        self.narrator_effect_volume_label = QtWidgets.QLabel("100%")
+        self.narrator_effect_volume_label.setMinimumWidth(50)
+        channels_layout.addWidget(self.narrator_effect_volume_label, 1, 2)
+        self.narrator_effect_test_button = QtWidgets.QPushButton("Test")
+        self.narrator_effect_test_button.setMaximumWidth(80)
+        channels_layout.addWidget(self.narrator_effect_test_button, 1, 3)
+
+        # Music channel
+        channels_layout.addWidget(QtWidgets.QLabel("Music:"), 2, 0)
+        self.narrator_music_volume_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.narrator_music_volume_slider.setRange(0, 100)
+        self.narrator_music_volume_slider.setValue(100)
+        self.narrator_music_volume_slider.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        self.narrator_music_volume_slider.setTickInterval(10)
+        channels_layout.addWidget(self.narrator_music_volume_slider, 2, 1)
+        self.narrator_music_volume_label = QtWidgets.QLabel("100%")
+        self.narrator_music_volume_label.setMinimumWidth(50)
+        channels_layout.addWidget(self.narrator_music_volume_label, 2, 2)
+        self.narrator_music_test_button = QtWidgets.QPushButton("Test")
+        self.narrator_music_test_button.setMaximumWidth(80)
+        channels_layout.addWidget(self.narrator_music_test_button, 2, 3)
+
+        main_layout.addWidget(channels_group)
+        main_layout.addStretch()
+
+        # Populate voice models and output devices
+        self._populate_narrator_voices()
+        self._populate_narrator_output_devices()
+
+        # Connect signals
+        self.narrator_voice_combo.currentIndexChanged.connect(self._on_narrator_voice_changed)
+        self.narrator_output_device_combo.currentIndexChanged.connect(self._on_narrator_output_device_changed)
+
+        self.narrator_voice_volume_slider.valueChanged.connect(self._on_narrator_voice_volume_changed)
+        self.narrator_effect_volume_slider.valueChanged.connect(self._on_narrator_effect_volume_changed)
+        self.narrator_music_volume_slider.valueChanged.connect(self._on_narrator_music_volume_changed)
+
+        self.narrator_voice_test_button.clicked.connect(self._on_narrator_voice_test)
+        self.narrator_effect_test_button.clicked.connect(self._on_narrator_effect_test)
+        self.narrator_music_test_button.clicked.connect(self._on_narrator_music_test)
+
+        # Initialize narrator with default voice if available
+        if self.narrator_voice_combo.count() > 0:
+            voice_path = self.narrator_voice_combo.itemData(0)
+            if voice_path:
+                try:
+                    self.core.narrator.load_voice_model(voice_path)
+                except Exception as e:
+                    print(f"Failed to load default voice model: {e}")
+
+        # Test text rotation counters
+        self.narrator_voice_test_index = 0
+        self.narrator_effect_test_index = 0
+        self.narrator_music_test_index = 0
+
+        return widget
+
+    def _populate_narrator_voices(self) -> None:
+        """Populate the narrator voice combo box with available Piper models."""
+        import os
+        from .narrator import find_available_voices
+
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        piper_voices_path = os.path.join(root_dir, "piper_voices")
+
+        self.narrator_voice_combo.clear()
+
+        voices = find_available_voices(piper_voices_path)
+        for voice_path in sorted(voices):
+            voice_name = os.path.basename(voice_path)
+            self.narrator_voice_combo.addItem(voice_name, voice_path)
+
+    def _populate_narrator_output_devices(self) -> None:
+        """Populate the narrator output device combo box."""
+        self.narrator_output_device_combo.clear()
+
+        # pygame.mixer only supports the system default output device
+        self.narrator_output_device_combo.addItem("System Default Output Device", None)
 
     def _set_section_spacer_visible(self, layout: QtWidgets.QVBoxLayout, visible: bool) -> None:
         """Show or hide the stretch spacer in a section layout.
@@ -1387,6 +1524,140 @@ class MainWindow(QtWidgets.QMainWindow):
         """Handle final speech recognition result."""
         self.speech_final_result_edit.setText(text)
 
+    @QtCore.Slot(int)
+    def _on_narrator_voice_changed(self, index: int) -> None:
+        """Handle narrator voice model selection change."""
+        if index < 0:
+            return
+
+        voice_path = self.narrator_voice_combo.itemData(index)
+        if voice_path:
+            try:
+                self.core.narrator.set_voice_model(voice_path)
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Voice Model Error",
+                    f"Failed to load voice model: {e}"
+                )
+
+    @QtCore.Slot(int)
+    def _on_narrator_output_device_changed(self, index: int) -> None:
+        """Handle narrator output device selection change."""
+        if index < 0:
+            return
+
+        device_index = self.narrator_output_device_combo.itemData(index)
+        self.core.narrator.mixer.set_output_device(device_index)
+
+    @QtCore.Slot(int)
+    def _on_narrator_voice_volume_changed(self, value: int) -> None:
+        """Handle voice channel volume change."""
+        from .sound_mixer import Channel
+        volume = value / 100.0
+        self.core.narrator.set_channel_volume(Channel.VOICE, volume)
+        self.narrator_voice_volume_label.setText(f"{value}%")
+
+    @QtCore.Slot(int)
+    def _on_narrator_effect_volume_changed(self, value: int) -> None:
+        """Handle effect channel volume change."""
+        from .sound_mixer import Channel
+        volume = value / 100.0
+        self.core.narrator.set_channel_volume(Channel.EFFECT, volume)
+        self.narrator_effect_volume_label.setText(f"{value}%")
+
+    @QtCore.Slot(int)
+    def _on_narrator_music_volume_changed(self, value: int) -> None:
+        """Handle music channel volume change."""
+        from .sound_mixer import Channel
+        volume = value / 100.0
+        self.core.narrator.set_channel_volume(Channel.MUSIC, volume)
+        self.narrator_music_volume_label.setText(f"{value}%")
+
+    @QtCore.Slot()
+    def _on_narrator_voice_test(self) -> None:
+        """Test voice channel with rotating text."""
+        from .sound_mixer import Channel
+
+        test_texts = [
+            "I must not fear. Fear is the mind-killer.",
+            "Violence is the last refuge of the incompetent.",
+            "In a hole in the ground there lived a hobbit."
+        ]
+
+        text = test_texts[self.narrator_voice_test_index]
+        self.narrator_voice_test_index = (self.narrator_voice_test_index + 1) % len(test_texts)
+
+        try:
+            self.core.narrator.synthesize_and_play(
+                text,
+                channel=Channel.VOICE,
+                do_play_immediately=True,
+                do_wait_until_played=False
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Voice Test Error",
+                f"Failed to play voice test: {e}"
+            )
+
+    @QtCore.Slot()
+    def _on_narrator_effect_test(self) -> None:
+        """Test effect channel with rotating text."""
+        from .sound_mixer import Channel
+
+        test_texts = [
+            "Boom.",
+            "Swish.",
+            "Pow."
+        ]
+
+        text = test_texts[self.narrator_effect_test_index]
+        self.narrator_effect_test_index = (self.narrator_effect_test_index + 1) % len(test_texts)
+
+        try:
+            self.core.narrator.synthesize_and_play(
+                text,
+                channel=Channel.EFFECT,
+                do_play_immediately=True,
+                do_wait_until_played=False
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Effect Test Error",
+                f"Failed to play effect test: {e}"
+            )
+
+    @QtCore.Slot()
+    def _on_narrator_music_test(self) -> None:
+        """Test music channel with rotating text."""
+        from .sound_mixer import Channel
+
+        test_texts = [
+            "Pum, tchick pum, pum tchick pum pum.",
+            "Na na naa, na. Na na naa, na. Hey hey, hey. Goodbye.",
+            "Do re mi fa sol la ti do."
+        ]
+
+        text = test_texts[self.narrator_music_test_index]
+        self.narrator_music_test_index = (self.narrator_music_test_index + 1) % len(test_texts)
+
+        try:
+            self.core.narrator.synthesize_and_play(
+                text,
+                channel=Channel.MUSIC,
+                do_play_immediately=True,
+                do_wait_until_played=False
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Music Test Error",
+                f"Failed to play music test: {e}"
+            )
+
     def _find_matching_vosk_model(self, saved_model_path: str) -> int:
         """Find matching vosk model in combo box.
 
@@ -1459,6 +1730,61 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # 3. Default to first item
         return 0 if self.speech_device_combo.count() > 0 else -1
+
+    def _find_matching_narrator_voice(self, saved_voice_path: str) -> int:
+        """Find matching narrator voice in combo box.
+
+        Args:
+            saved_voice_path: The saved voice model path to match.
+
+        Returns:
+            Index of matching voice, or 0 if no match.
+        """
+        import os
+
+        # Try exact match first
+        for i in range(self.narrator_voice_combo.count()):
+            if self.narrator_voice_combo.itemData(i) == saved_voice_path:
+                return i
+
+        # Try matching just the voice name (last part of path)
+        saved_voice_name = os.path.basename(saved_voice_path)
+        for i in range(self.narrator_voice_combo.count()):
+            voice_path = self.narrator_voice_combo.itemData(i)
+            if voice_path and os.path.basename(voice_path) == saved_voice_name:
+                return i
+
+        # Default to first item
+        return 0 if self.narrator_voice_combo.count() > 0 else -1
+
+    def _find_matching_narrator_output_device(self, saved_device_index: int, saved_device_name: str = None) -> int:
+        """Find matching narrator output device in combo box.
+
+        Prioritizes matching by device name, then by device index.
+
+        Args:
+            saved_device_index: The saved device index to match.
+            saved_device_name: The saved device name to match (optional but preferred).
+
+        Returns:
+            Combo box index of matching device, or 0 (default device) if no match.
+        """
+        # Try matching by device name first (most reliable)
+        if saved_device_name:
+            for i in range(self.narrator_output_device_combo.count()):
+                item_text = self.narrator_output_device_combo.itemText(i)
+                if saved_device_name in item_text or item_text in saved_device_name:
+                    return i
+
+        # Try matching by device index
+        if saved_device_index is not None:
+            for i in range(self.narrator_output_device_combo.count()):
+                device_index = self.narrator_output_device_combo.itemData(i)
+                if device_index == saved_device_index:
+                    return i
+
+        # Default to first item (Default Output Device)
+        return 0
 
     def _create_camera_tabs(self) -> QtWidgets.QTabWidget:
         """Create the camera tab widget.
@@ -2018,13 +2344,35 @@ class MainWindow(QtWidgets.QMainWindow):
         self._clear_calibration_frames()
 
     @QtCore.Slot(int)
-    def _on_viewport_fps_changed(self, fps: int) -> None:
-        """Handle viewport FPS change.
+    def _on_viewports_fps_changed(self, fps: int) -> None:
+        """Handle viewports FPS change.
 
         Args:
             fps: New frames per second value.
         """
+        self.core.viewports_refresh_rate = fps
         self.viewport.set_fps(fps)
+
+    @QtCore.Slot(int)
+    def _on_projectors_fps_changed(self, fps: int) -> None:
+        """Handle projectors FPS change.
+
+        Args:
+            fps: New frames per second value.
+        """
+        self.core.projectors_refresh_rate = fps
+        # Update all existing projectors
+        for projector in self.core.projector_manager.get_all_projectors():
+            projector.set_fps(fps)
+
+    @QtCore.Slot(int)
+    def _on_qr_code_fps_changed(self, fps: int) -> None:
+        """Handle QR code scanning FPS change.
+
+        Args:
+            fps: New frames per second value.
+        """
+        self.core.set_qr_code_refresh_rate(fps)
 
     @QtCore.Slot()
     def _on_save_camera(self) -> None:
@@ -2451,7 +2799,8 @@ class MainWindow(QtWidgets.QMainWindow):
             try:
                 self.core.projector_manager.add_projector(
                     dialog.projector_name,
-                    dialog.projector_resolution
+                    dialog.projector_resolution,
+                    self.core.projectors_refresh_rate
                 )
             except Exception as e:
                 QtWidgets.QMessageBox.critical(
@@ -3122,6 +3471,32 @@ class MainWindow(QtWidgets.QMainWindow):
                         speech_config['device_name'] = device['name']
                         break
 
+            # Get narrator configuration
+            from .sound_mixer import Channel
+            narrator_config = {
+                'voice_model_path': self.core.narrator.voice_model_path,
+                'output_device_index': None,
+                'output_device_name': None,
+                'voice_volume': self.core.narrator.get_channel_volume(Channel.VOICE),
+                'effect_volume': self.core.narrator.get_channel_volume(Channel.EFFECT),
+                'music_volume': self.core.narrator.get_channel_volume(Channel.MUSIC)
+            }
+
+            # Get output device info if selected
+            current_device_index = self.narrator_output_device_combo.currentIndex()
+            if current_device_index > 0:  # Skip "Default Output Device" at index 0
+                device_index = self.narrator_output_device_combo.itemData(current_device_index)
+                device_name = self.narrator_output_device_combo.itemText(current_device_index)
+                narrator_config['output_device_index'] = device_index
+                narrator_config['output_device_name'] = device_name
+
+            # Get refresh rates
+            refresh_rates = {
+                'viewports_fps': self.core.viewports_refresh_rate,
+                'projectors_fps': self.core.projectors_refresh_rate,
+                'qr_code_fps': self.core.qr_code_refresh_rate
+            }
+
             # Create master configuration dictionary with standard structure
             master_config = {
                 'type': 'master',
@@ -3130,7 +3505,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     'cameras': cameras_data,
                     'projectors': projectors_data,
                     'zones': zones_data,
-                    'speech_recognition': speech_config
+                    'speech_recognition': speech_config,
+                    'narrator': narrator_config,
+                    'refresh_rates': refresh_rates
                 }
             }
 
@@ -3449,6 +3826,92 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.speech_device_combo.blockSignals(False)
                         device_index = self.speech_device_combo.itemData(device_combo_index)
                         self.core.update_speech_recognizer(device_index=device_index)
+
+            # Load narrator configuration
+            narrator_config = master_data.get('narrator', {})
+            if narrator_config:
+                from .sound_mixer import Channel
+
+                # Load voice model
+                saved_voice_path = narrator_config.get('voice_model_path')
+                if saved_voice_path:
+                    voice_index = self._find_matching_narrator_voice(saved_voice_path)
+                    if voice_index >= 0:
+                        self.narrator_voice_combo.blockSignals(True)
+                        self.narrator_voice_combo.setCurrentIndex(voice_index)
+                        self.narrator_voice_combo.blockSignals(False)
+                        voice_path = self.narrator_voice_combo.itemData(voice_index)
+                        if voice_path:
+                            try:
+                                self.core.narrator.set_voice_model(voice_path)
+                            except Exception as e:
+                                print(f"Failed to load narrator voice model: {e}")
+
+                # Load output device
+                saved_device_index = narrator_config.get('output_device_index')
+                saved_device_name = narrator_config.get('output_device_name')
+                if saved_device_index is not None or saved_device_name:
+                    device_combo_index = self._find_matching_narrator_output_device(saved_device_index, saved_device_name)
+                    if device_combo_index >= 0:
+                        self.narrator_output_device_combo.blockSignals(True)
+                        self.narrator_output_device_combo.setCurrentIndex(device_combo_index)
+                        self.narrator_output_device_combo.blockSignals(False)
+                        # Apply the device to the mixer
+                        device_index = self.narrator_output_device_combo.itemData(device_combo_index)
+                        self.core.narrator.mixer.set_output_device(device_index)
+
+                # Load channel volumes
+                voice_volume = narrator_config.get('voice_volume', 1.0)
+                effect_volume = narrator_config.get('effect_volume', 1.0)
+                music_volume = narrator_config.get('music_volume', 1.0)
+
+                self.narrator_voice_volume_slider.blockSignals(True)
+                self.narrator_voice_volume_slider.setValue(int(voice_volume * 100))
+                self.narrator_voice_volume_slider.blockSignals(False)
+                self.narrator_voice_volume_label.setText(f"{int(voice_volume * 100)}%")
+                self.core.narrator.set_channel_volume(Channel.VOICE, voice_volume)
+
+                self.narrator_effect_volume_slider.blockSignals(True)
+                self.narrator_effect_volume_slider.setValue(int(effect_volume * 100))
+                self.narrator_effect_volume_slider.blockSignals(False)
+                self.narrator_effect_volume_label.setText(f"{int(effect_volume * 100)}%")
+                self.core.narrator.set_channel_volume(Channel.EFFECT, effect_volume)
+
+                self.narrator_music_volume_slider.blockSignals(True)
+                self.narrator_music_volume_slider.setValue(int(music_volume * 100))
+                self.narrator_music_volume_slider.blockSignals(False)
+                self.narrator_music_volume_label.setText(f"{int(music_volume * 100)}%")
+                self.core.narrator.set_channel_volume(Channel.MUSIC, music_volume)
+
+            # Load refresh rates
+            refresh_rates = master_data.get('refresh_rates', {})
+            if refresh_rates:
+                viewports_fps = refresh_rates.get('viewports_fps', 30)
+                projectors_fps = refresh_rates.get('projectors_fps', 15)
+                qr_code_fps = refresh_rates.get('qr_code_fps', 5)
+
+                # Update UI spinboxes
+                self.viewports_fps_spinbox.blockSignals(True)
+                self.viewports_fps_spinbox.setValue(viewports_fps)
+                self.viewports_fps_spinbox.blockSignals(False)
+
+                self.projectors_fps_spinbox.blockSignals(True)
+                self.projectors_fps_spinbox.setValue(projectors_fps)
+                self.projectors_fps_spinbox.blockSignals(False)
+
+                self.qr_code_fps_spinbox.blockSignals(True)
+                self.qr_code_fps_spinbox.setValue(qr_code_fps)
+                self.qr_code_fps_spinbox.blockSignals(False)
+
+                # Apply to core and all objects
+                self.core.viewports_refresh_rate = viewports_fps
+                self.viewport.set_fps(viewports_fps)
+
+                self.core.projectors_refresh_rate = projectors_fps
+                for projector in self.core.projector_manager.get_all_projectors():
+                    projector.set_fps(projectors_fps)
+
+                self.core.set_qr_code_refresh_rate(qr_code_fps)
 
             # Trigger selection change callbacks to update UI
             self._on_camera_selection_changed()

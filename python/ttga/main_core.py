@@ -29,6 +29,7 @@ from .camera_calibration import CameraCalibration
 from .projector_manager import ProjectorManager
 from .zone_manager import ZoneManager
 from .speech_recognition import SpeechRecognizer
+from .narrator import Narrator
 
 
 class MainCore(QtCore.QObject):
@@ -46,6 +47,10 @@ class MainCore(QtCore.QObject):
         speech_model_path: Path to Vosk model for speech recognition.
         speech_device_index: Audio input device index for speech recognition.
         speech_threshold: Similarity threshold for speech recognition matching.
+        narrator: Narrator instance for TTS and audio playback.
+        viewports_refresh_rate: Refresh rate for camera viewports in FPS.
+        projectors_refresh_rate: Refresh rate for projector displays in FPS.
+        qr_code_refresh_rate: Refresh rate for QR code scanning in FPS.
 
     Signals:
         speech_partial_result: Emitted when partial speech recognition result is received.
@@ -68,6 +73,14 @@ class MainCore(QtCore.QObject):
         self.speech_model_path: Optional[str] = None
         self.speech_device_index: Optional[int] = None
         self.speech_threshold: float = 0.7
+
+        # Narrator (TTS and audio)
+        self.narrator = Narrator()
+
+        # Refresh rates
+        self.viewports_refresh_rate: int = 30
+        self.projectors_refresh_rate: int = 15
+        self.qr_code_refresh_rate: int = 5
 
     def update_speech_recognizer(
         self, model_path: Optional[str] = None, device_index: Optional[int] = None
@@ -117,11 +130,22 @@ class MainCore(QtCore.QObject):
         # if self.current_game:
         #     self.current_game.on_speech_command(text)
 
+    @QtCore.Slot(int)
+    def set_qr_code_refresh_rate(self, fps: int) -> None:
+        """Set the QR code scanning refresh rate.
+
+        Args:
+            fps: Refresh rate in frames per second.
+        """
+        self.qr_code_refresh_rate = fps
+        # TODO: Apply to QR code scanner when implemented
+
     def release_all(self) -> None:
         """Release all resources."""
         if self.speech_recognizer is not None:
             self.speech_recognizer.stop()
             self.speech_recognizer = None
+        self.narrator.shutdown()
         self.camera_manager.release_all()
         self.projector_manager.clear_all()
         self.zone_manager.clear_all()
