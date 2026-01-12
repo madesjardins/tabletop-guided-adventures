@@ -66,6 +66,9 @@ class ViewportWidget(QtWidgets.QLabel):
         # Zone manager reference for overlay compositing
         self._zone_manager = None
 
+        # MainCore reference for game overlay queries
+        self._main_core = None
+
         # Vertex dragging state
         self._dragging_vertex: tuple | None = None  # (zone, vertex_idx, camera_name)
         self._drag_start_pos: tuple[int, int] | None = None
@@ -112,6 +115,14 @@ class ViewportWidget(QtWidgets.QLabel):
             zone_manager: ZoneManager instance.
         """
         self._zone_manager = zone_manager
+
+    def set_main_core(self, main_core) -> None:
+        """Set the main core for game overlay queries.
+
+        Args:
+            main_core: MainCore instance.
+        """
+        self._main_core = main_core
 
     def set_fps(self, fps: int) -> None:
         """Set the viewport refresh rate.
@@ -233,6 +244,69 @@ class ViewportWidget(QtWidgets.QLabel):
                 result_frames.append(composited)
             else:
                 result_frames.append(frame)
+
+            # Composite game overlays after zone overlays
+            if self._main_core is not None:
+                composited_with_game = result_frames[-1]
+                for zone in zones:
+                    # Only process zones with calibrated camera mapping
+                    if not zone.camera_mapping or not zone.camera_mapping.is_calibrated:
+                        continue
+
+                    # Get game overlay for this zone
+                    game_overlay = self._main_core.get_game_camera_overlay(zone.name)
+                    if game_overlay is None:
+                        continue
+
+                    # Check if overlay has any non-zero alpha values
+                    if np.max(game_overlay[:, :, 3]) == 0:
+                        continue  # Skip fully transparent overlays
+
+                    # Get transformation matrix and ROI
+                    matrix = zone.camera_mapping.game_to_camera_matrix
+                    roi = zone.camera_mapping.roi
+                    if matrix is None or roi is None:
+                        continue
+
+                    # Calculate ROI dimensions
+                    roi_width = roi['max_x'] - roi['min_x']
+                    roi_height = roi['max_y'] - roi['min_y']
+
+                    # Warp game overlay to camera coordinates
+                    warped_overlay = cv.warpPerspective(
+                        game_overlay,
+                        matrix,
+                        (roi_width, roi_height)
+                    )
+
+                    # Ensure we don't go out of frame bounds
+                    x_start = max(0, roi['min_x'])
+                    y_start = max(0, roi['min_y'])
+                    x_end = min(composited_with_game.shape[1], roi['max_x'])
+                    y_end = min(composited_with_game.shape[0], roi['max_y'])
+
+                    # Calculate actual dimensions after bounds checking
+                    actual_width = x_end - x_start
+                    actual_height = y_end - y_start
+
+                    if actual_width <= 0 or actual_height <= 0:
+                        continue
+
+                    # Crop warped overlay if needed
+                    warped_crop = warped_overlay[:actual_height, :actual_width]
+
+                    # Extract ROI from frame
+                    frame_roi = composited_with_game[y_start:y_end, x_start:x_end]
+
+                    # Composite BGRA overlay onto BGR ROI
+                    alpha = warped_crop[:, :, 3:4] / 255.0
+                    blended = (frame_roi * (1 - alpha) + warped_crop[:, :, :3] * alpha).astype(np.uint8)
+
+                    # Put blended ROI back into frame
+                    composited_with_game[y_start:y_end, x_start:x_end] = blended
+
+                # Update the result with game overlays composited
+                result_frames[-1] = composited_with_game
 
         return result_frames
 

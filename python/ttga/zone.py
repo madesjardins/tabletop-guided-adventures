@@ -695,3 +695,39 @@ class Zone:
         if self.projector_mapping and self.projector_mapping.enabled and self.projector_mapping.is_calibrated:
             return True
         return False
+
+    def get_latest_camera_image_cropped(self, camera_manager) -> np.ndarray | None:
+        """Get the latest camera image cropped to the ROI.
+
+        Args:
+            camera_manager: CameraManager instance to get camera from.
+
+        Returns:
+            Cropped camera image (ROI only) or None if no camera mapping or no frame available.
+        """
+        if not self.camera_mapping or not self.camera_mapping.enabled:
+            return None
+
+        if not self.camera_mapping.roi:
+            return None
+
+        # Get camera
+        try:
+            camera = camera_manager.get_camera(self.camera_mapping.camera_name)
+        except KeyError:
+            return None
+
+        # Get latest frame
+        frame = camera.get_undistorted_frame()
+        if frame is None:
+            return None
+
+        # Crop to ROI
+        roi = self.camera_mapping.roi
+        min_x = max(0, roi['min_x'])
+        min_y = max(0, roi['min_y'])
+        max_x = min(frame.shape[1], roi['max_x'])
+        max_y = min(frame.shape[0], roi['max_y'])
+
+        cropped = frame[min_y:max_y, min_x:max_x]
+        return cropped

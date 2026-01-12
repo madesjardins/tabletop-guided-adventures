@@ -21,10 +21,15 @@ with support for MicroQR codes and drawing detection results.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import cv2 as cv
 import numpy as np
 import pyboof as pb
+from PySide6 import QtCore
+
+if TYPE_CHECKING:
+    from .zone import Zone
 
 
 @dataclass
@@ -41,24 +46,91 @@ class QRDetection:
     bounds: tuple[int, int, int, int]
 
 
-class QRDetector:
-    """QR code detector using PyBoof.
+class QRDetector(QtCore.QObject):
+    """QR code detector using PyBoof with periodic detection and signal emission.
 
     This class provides QR code detection capabilities (including MicroQR) using
-    the PyBoof library, which wraps BoofCV for computer vision tasks.
+    the PyBoof library, which wraps BoofCV for computer vision tasks. It can
+    automatically detect QR codes at a specified refresh rate and emit signals
+    with the detection results.
+
+    Signals:
+        detections_updated: Emitted with list of QRDetection objects when new detections are found.
 
     Example:
-        >>> detector = QRDetector()
-        >>> image = cv.imread("image.jpg")
-        >>> detections = detector.detect(image)
-        >>> for detection in detections:
-        ...     print(f"Detected: {detection.message}")
+        >>> detector = QRDetector(zone, refresh_rate=5)
+        >>> detector.detections_updated.connect(lambda dets: print(f"Found {len(dets)} QR codes"))
+        >>> detector.start()
     """
 
-    def __init__(self) -> None:
-        """Initialize the QR detector."""
+    detections_updated = QtCore.Signal(list)  # list[QRDetection]
+
+    def __init__(self, zone: Zone, camera_manager, refresh_rate: int = 5) -> None:
+        """Initialize the QR detector.
+
+        Args:
+            zone: Zone object to get images from for detection.
+            camera_manager: CameraManager instance to access cameras.
+            refresh_rate: Detection refresh rate in Hz (detections per second).
+        """
+        super().__init__()
+        self.zone = zone
+        self.camera_manager = camera_manager
+        self.refresh_rate = refresh_rate
+
         # Create MicroQR detector
         self._detector = pb.FactoryFiducial(np.uint8).microqr()
+
+        # Timer for periodic detection
+        self._timer = QtCore.QTimer()
+        self._timer.timeout.connect(self._on_timer)
+        self._running = False
+
+    def start(self) -> None:
+        """Start periodic QR code detection."""
+        if not self._running:
+            self._running = True
+            interval_ms = int(1000 / self.refresh_rate)
+            self._timer.start(interval_ms)
+
+    def stop(self) -> None:
+        """Stop periodic QR code detection."""
+        if self._running:
+            self._running = False
+            self._timer.stop()
+
+    def is_running(self) -> bool:
+        """Check if detector is currently running.
+
+        Returns:
+            True if detector is running, False otherwise.
+        """
+        return self._running
+
+    def set_refresh_rate(self, refresh_rate: int) -> None:
+        """Set the detection refresh rate.
+
+        Args:
+            refresh_rate: New refresh rate in Hz.
+        """
+        self.refresh_rate = refresh_rate
+        if self._running:
+            interval_ms = int(1000 / self.refresh_rate)
+            self._timer.setInterval(interval_ms)
+
+    @QtCore.Slot()
+    def _on_timer(self) -> None:
+        """Timer callback for periodic detection."""
+        # Get latest image from zone (cropped to ROI)
+        image = self.zone.get_latest_camera_image_cropped(self.camera_manager)
+        if image is None:
+            return
+
+        # Detect QR codes
+        detections = self.detect(image)
+
+        # Emit signal with detections
+        self.detections_updated.emit(detections)
 
     def detect(self, image: np.ndarray) -> list[QRDetection]:
         """Detect MicroQR codes in an image.
@@ -70,7 +142,7 @@ class QRDetector:
             List of QRDetection objects for all detected QR codes.
 
         Example:
-            >>> detector = QRDetector()
+            >>> detector = QRDetector(zone)
             >>> image = cv.imread("qr_image.jpg")
             >>> detections = detector.detect(image)
             >>> print(f"Found {len(detections)} QR code(s)")

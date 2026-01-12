@@ -51,6 +51,9 @@ class ProjectorViewport(QtWidgets.QLabel):
         # Zone manager reference for overlay compositing
         self._zone_manager = None
 
+        # MainCore reference for game overlay queries
+        self._main_core = None
+
         # Vertex dragging state
         self._dragging_vertex: tuple | None = None  # (zone, vertex_idx)
         self._drag_start_pos: tuple[int, int] | None = None
@@ -79,6 +82,14 @@ class ProjectorViewport(QtWidgets.QLabel):
         """
         self._zone_manager = zone_manager
 
+    def set_main_core(self, main_core) -> None:
+        """Set the main core for game overlay queries.
+
+        Args:
+            main_core: MainCore instance.
+        """
+        self._main_core = main_core
+
     def _update_display(self) -> None:
         """Update the displayed image with zone overlays."""
         width, height = self.resolution
@@ -88,38 +99,90 @@ class ProjectorViewport(QtWidgets.QLabel):
             zones = self._zone_manager.get_zones_with_projector_mapping(self.projector_name)
 
             if zones:
-                # Collect overlays to composite
+                # Start with black base image
+                image = np.zeros((height, width, 3), dtype=np.uint8)
+
+                # Composite zone overlays (if draw_locked_borders is enabled)
                 overlays_to_composite = []
                 for zone in zones:
                     overlay_data = zone.get_projector_overlay((height, width, 3))
                     if overlay_data is not None:
                         overlays_to_composite.append(overlay_data)
 
-                if overlays_to_composite:
-                    # Start with black base image
-                    image = np.zeros((height, width, 3), dtype=np.uint8)
+                for overlay_data in overlays_to_composite:
+                    overlay, x, y, w, h = overlay_data
 
-                    # Composite each overlay
-                    for overlay_data in overlays_to_composite:
-                        overlay, x, y, w, h = overlay_data
+                    # Extract ROI
+                    roi = image[y:y + h, x:x + w]
 
-                        # Extract ROI
-                        roi = image[y:y + h, x:x + w]
+                    # Composite BGRA overlay onto BGR ROI
+                    alpha = overlay[:, :, 3:4] / 255.0
+                    blended_roi = (roi * (1 - alpha) + overlay[:, :, :3] * alpha).astype(np.uint8)
+
+                    # Put blended ROI back
+                    image[y:y + h, x:x + w] = blended_roi
+
+                # Always composite game overlays (independent of zone overlay settings)
+                if self._main_core is not None:
+                    for zone in zones:
+                        # Only process zones with calibrated projector mapping
+                        if not zone.projector_mapping or not zone.projector_mapping.is_calibrated:
+                            continue
+
+                        # Get game overlay for this zone
+                        game_overlay = self._main_core.get_game_projector_overlay(zone.name)
+                        if game_overlay is None:
+                            continue
+
+                        # Check if overlay has any non-zero alpha values
+                        if np.max(game_overlay[:, :, 3]) == 0:
+                            continue  # Skip fully transparent overlays
+
+                        # Get transformation matrix and ROI
+                        matrix = zone.projector_mapping.game_to_projector_matrix
+                        roi = zone.projector_mapping.roi
+                        if matrix is None or roi is None:
+                            continue
+
+                        # Calculate ROI dimensions
+                        roi_width = roi['max_x'] - roi['min_x']
+                        roi_height = roi['max_y'] - roi['min_y']
+
+                        # Warp game overlay to projector coordinates
+                        warped_overlay = cv.warpPerspective(
+                            game_overlay,
+                            matrix,
+                            (roi_width, roi_height)
+                        )
+
+                        # Ensure we don't go out of frame bounds
+                        x_start = max(0, roi['min_x'])
+                        y_start = max(0, roi['min_y'])
+                        x_end = min(image.shape[1], roi['max_x'])
+                        y_end = min(image.shape[0], roi['max_y'])
+
+                        # Calculate actual dimensions after bounds checking
+                        actual_width = x_end - x_start
+                        actual_height = y_end - y_start
+
+                        if actual_width <= 0 or actual_height <= 0:
+                            continue
+
+                        # Crop warped overlay if needed
+                        warped_crop = warped_overlay[:actual_height, :actual_width]
+
+                        # Extract ROI from frame
+                        frame_roi = image[y_start:y_end, x_start:x_end]
 
                         # Composite BGRA overlay onto BGR ROI
-                        alpha = overlay[:, :, 3:4] / 255.0
-                        blended_roi = (roi * (1 - alpha) + overlay[:, :, :3] * alpha).astype(np.uint8)
+                        alpha = warped_crop[:, :, 3:4] / 255.0
+                        blended = (frame_roi * (1 - alpha) + warped_crop[:, :, :3] * alpha).astype(np.uint8)
 
-                        # Put blended ROI back
-                        image[y:y + h, x:x + w] = blended_roi
+                        # Put blended ROI back into frame
+                        image[y_start:y_end, x_start:x_end] = blended
 
-                    self._display_image(image)
-                    return
-                else:
-                    # Zones exist but nothing to draw - show black image
-                    image = np.zeros((height, width, 3), dtype=np.uint8)
-                    self._display_image(image)
-                    return
+                self._display_image(image)
+                return
 
         # No zones or no zone manager - show test image
         self._generate_test_image()

@@ -8,3 +8,4 @@ piper-tts
 pygame
 sounddevice
 python-Levenshtein
+PyYAML

@@ -76,6 +76,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.core.speech_partial_result.connect(self._on_speech_partial_result)
         self.core.speech_final_result.connect(self._on_speech_final_result)
 
+        # Connect game signals
+        self.core.game_loaded.connect(self._on_game_loaded)
+        self.core.game_unloaded.connect(self._on_game_unloaded)
+
         # Initialize zone settings UI state
         self._on_zone_selection_changed()
 
@@ -86,6 +90,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._get_selected_camera_names
         )
         self.viewport.set_zone_manager(self.core.zone_manager)
+        self.viewport.set_main_core(self.core)
         self.viewport.vertex_updated.connect(self._on_viewport_vertex_updated)
         self.viewport.start()
 
@@ -113,6 +118,20 @@ class MainWindow(QtWidgets.QMainWindow):
         quit_action.setShortcut("Ctrl+Q")
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
+
+        # Game menu
+        game_menu = menu_bar.addMenu("&Game")
+
+        # Load game action
+        load_game_action = QtGui.QAction("&Load Game...", self)
+        load_game_action.triggered.connect(self._on_load_game)
+        game_menu.addAction(load_game_action)
+
+        # Unload game action
+        self.unload_game_action = QtGui.QAction("&Unload Game", self)
+        self.unload_game_action.triggered.connect(self._on_unload_game)
+        self.unload_game_action.setEnabled(False)  # Disabled until a game is loaded
+        game_menu.addAction(self.unload_game_action)
 
     def _setup_ui(self) -> None:
         """Set up the main user interface."""
@@ -2375,6 +2394,112 @@ class MainWindow(QtWidgets.QMainWindow):
         self.core.set_qr_code_refresh_rate(fps)
 
     @QtCore.Slot()
+    def _on_load_game(self) -> None:
+        """Handle load game menu action."""
+        from .game_loader import GameInfo
+
+        # Discover available games
+        games = self.core.game_loader.discover_games()
+
+        if not games:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No Games Found",
+                "No games were found in the games/ or test_games/ directories.\n\n"
+                "To add a game, create a folder in games/ or test_games/ with a game.py file."
+            )
+            return
+
+        # Create selection dialog
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Load Game")
+        dialog.setMinimumWidth(500)
+
+        layout = QtWidgets.QVBoxLayout(dialog)
+
+        # Instructions
+        label = QtWidgets.QLabel("Select a game to load:")
+        layout.addWidget(label)
+
+        # Game list
+        game_list = QtWidgets.QListWidget()
+        for game in games:
+            item = QtWidgets.QListWidgetItem(str(game))
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, game)
+
+            # Add tooltip with description
+            if game.description:
+                item.setToolTip(game.description)
+
+            game_list.addItem(item)
+
+        game_list.setCurrentRow(0)
+        layout.addWidget(game_list)
+
+        # Buttons
+        button_box = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok |
+            QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        # Show dialog
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            selected_item = game_list.currentItem()
+            if selected_item:
+                game_info: GameInfo = selected_item.data(QtCore.Qt.ItemDataRole.UserRole)
+
+                # Load the game
+                success = self.core.load_game(game_info)
+
+                if not success:
+                    QtWidgets.QMessageBox.critical(
+                        self,
+                        "Game Load Failed",
+                        f"Failed to load game: {game_info.name}\n\n"
+                        "Check the console for error details."
+                    )
+
+    @QtCore.Slot()
+    def _on_unload_game(self) -> None:
+        """Handle unload game menu action."""
+        if self.core.current_game_info:
+            game_name = self.core.current_game_info.name
+
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Unload Game",
+                f"Unload '{game_name}'?",
+                QtWidgets.QMessageBox.StandardButton.Yes |
+                QtWidgets.QMessageBox.StandardButton.No
+            )
+
+            if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+                self.core.unload_game()
+
+    @QtCore.Slot(str)
+    def _on_game_loaded(self, game_name: str) -> None:
+        """Handle game loaded signal.
+
+        Args:
+            game_name: Name of the loaded game.
+        """
+        self.unload_game_action.setEnabled(True)
+        self.setWindowTitle(f"Tabletop Guided Adventures - {game_name}")
+
+        # Auto-open game dialog
+        if self.core.current_game:
+            self.core.current_game.show_dialog(parent=self)
+
+    @QtCore.Slot()
+    def _on_game_unloaded(self) -> None:
+        """Handle game unloaded signal."""
+        self.unload_game_action.setEnabled(False)
+        self.setWindowTitle("Tabletop Guided Adventures")
+
+    @QtCore.Slot()
     def _on_save_camera(self) -> None:
         """Handle save camera button click."""
         # Get all cameras data
@@ -2725,6 +2850,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Create and show projector dialog automatically
         dialog = ProjectorDialog(projector.name, projector.resolution, self)
         dialog.viewport.set_zone_manager(self.core.zone_manager)
+        dialog.viewport.set_main_core(self.core)
         dialog.viewport.vertex_updated.connect(self._on_projector_viewport_vertex_updated)
         projector.dialog = dialog
         dialog.show()
@@ -2774,6 +2900,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if projector.dialog is None or not projector.dialog.isVisible():
                 dialog = ProjectorDialog(projector.name, projector.resolution, self)
                 dialog.viewport.set_zone_manager(self.core.zone_manager)
+                dialog.viewport.set_main_core(self.core)
                 dialog.viewport.vertex_updated.connect(self._on_projector_viewport_vertex_updated)
                 projector.dialog = dialog
                 dialog.show()
@@ -3941,6 +4068,10 @@ class MainWindow(QtWidgets.QMainWindow):
         Args:
             event: Close event.
         """
+        # Unload game if one is loaded
+        if self.core.current_game:
+            self.core.unload_game()
+
         # Stop viewport updates
         self.viewport.stop()
 

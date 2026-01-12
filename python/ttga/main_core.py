@@ -30,6 +30,8 @@ from .projector_manager import ProjectorManager
 from .zone_manager import ZoneManager
 from .speech_recognition import SpeechRecognizer
 from .narrator import Narrator
+from .game_loader import GameLoader, GameInfo
+from .game_base import GameBase
 
 
 class MainCore(QtCore.QObject):
@@ -51,14 +53,21 @@ class MainCore(QtCore.QObject):
         viewports_refresh_rate: Refresh rate for camera viewports in FPS.
         projectors_refresh_rate: Refresh rate for projector displays in FPS.
         qr_code_refresh_rate: Refresh rate for QR code scanning in FPS.
+        game_loader: Game loader for discovering and loading game plugins.
+        current_game: Currently loaded game instance (None if no game loaded).
+        current_game_info: Info about the currently loaded game.
 
     Signals:
         speech_partial_result: Emitted when partial speech recognition result is received.
         speech_final_result: Emitted when final speech recognition result is received.
+        game_loaded: Emitted when a game is loaded.
+        game_unloaded: Emitted when a game is unloaded.
     """
 
     speech_partial_result = QtCore.Signal(str)
     speech_final_result = QtCore.Signal(str)
+    game_loaded = QtCore.Signal(str)  # game name
+    game_unloaded = QtCore.Signal()
 
     def __init__(self) -> None:
         """Initialize the main core."""
@@ -81,6 +90,11 @@ class MainCore(QtCore.QObject):
         self.viewports_refresh_rate: int = 30
         self.projectors_refresh_rate: int = 15
         self.qr_code_refresh_rate: int = 5
+
+        # Game management
+        self.game_loader = GameLoader()
+        self.current_game: Optional[GameBase] = None
+        self.current_game_info: Optional[GameInfo] = None
 
     def update_speech_recognizer(
         self, model_path: Optional[str] = None, device_index: Optional[int] = None
@@ -126,9 +140,9 @@ class MainCore(QtCore.QObject):
         # Emit signal for UI and other listeners
         self.speech_final_result.emit(text)
 
-        # TODO: When a game is loaded, call game method with final result
-        # if self.current_game:
-        #     self.current_game.on_speech_command(text)
+        # Pass to current game if loaded
+        if self.current_game:
+            self.current_game.on_speech_command(text)
 
     @QtCore.Slot(int)
     def set_qr_code_refresh_rate(self, fps: int) -> None:
@@ -138,10 +152,100 @@ class MainCore(QtCore.QObject):
             fps: Refresh rate in frames per second.
         """
         self.qr_code_refresh_rate = fps
-        # TODO: Apply to QR code scanner when implemented
+
+        # Update QR detectors in current game if loaded
+        if self.current_game:
+            self.current_game.set_qr_detectors_refresh_rate(fps)
+
+    def load_game(self, game_info: GameInfo) -> bool:
+        """Load a game plugin.
+
+        Unloads the current game if one is loaded, then loads the new game.
+
+        Args:
+            game_info: GameInfo object for the game to load.
+
+        Returns:
+            True if game loaded successfully, False otherwise.
+        """
+        # Unload current game if any
+        if self.current_game:
+            self.unload_game()
+
+        # Load the new game
+        game_instance = self.game_loader.load_game(game_info, self)
+        if game_instance is None:
+            return False
+
+        self.current_game = game_instance
+        self.current_game_info = game_info
+
+        # Call game's on_load
+        try:
+            self.current_game.on_load()
+            self.game_loaded.emit(game_info.name)
+            return True
+        except Exception as e:
+            print(f"Error calling on_load for game {game_info.name}: {e}")
+            import traceback
+            traceback.print_exc()
+            self.current_game = None
+            self.current_game_info = None
+            return False
+
+    def unload_game(self) -> None:
+        """Unload the current game if one is loaded."""
+        if self.current_game is None:
+            return
+
+        # Call game's on_unload
+        try:
+            self.current_game.on_unload()
+        except Exception as e:
+            print(f"Error calling on_unload for game: {e}")
+
+        # Clean up
+        if self.current_game_info:
+            self.game_loader.unload_game(self.current_game_info)
+
+        self.current_game = None
+        self.current_game_info = None
+        self.game_unloaded.emit()
+
+    def get_game_camera_overlay(self, zone_name: str):
+        """Get the camera overlay image from the current game for a specific zone.
+
+        Args:
+            zone_name: Name of the zone to get overlay for.
+
+        Returns:
+            numpy.ndarray with shape (height, width, 4) in BGRA format with game coordinates,
+            or None if no game loaded or no overlay for this zone.
+        """
+        if self.current_game is None:
+            return None
+        return self.current_game.get_camera_overlay(zone_name)
+
+    def get_game_projector_overlay(self, zone_name: str):
+        """Get the projector overlay image from the current game for a specific zone.
+
+        Args:
+            zone_name: Name of the zone to get overlay for.
+
+        Returns:
+            numpy.ndarray with shape (height, width, 4) in BGRA format with game coordinates,
+            or None if no game loaded or no overlay for this zone.
+        """
+        if self.current_game is None:
+            return None
+        return self.current_game.get_projector_overlay(zone_name)
 
     def release_all(self) -> None:
         """Release all resources."""
+        # Unload current game
+        if self.current_game:
+            self.unload_game()
+
         if self.speech_recognizer is not None:
             self.speech_recognizer.stop()
             self.speech_recognizer = None
