@@ -1,0 +1,1 @@
+# QR Detection game package

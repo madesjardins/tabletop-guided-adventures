@@ -306,11 +306,11 @@ class Zone:
 
         x_min = max(0, min(xs) - padding)
         y_min = max(0, min(ys) - padding)
-        x_max = min(frame_shape[1], max(xs) + padding)
-        y_max = min(frame_shape[0], max(ys) + padding)
+        x_max = min(frame_shape[1] - 1, max(xs) + padding)
+        y_max = min(frame_shape[0] - 1, max(ys) + padding)
 
-        roi_width = x_max - x_min
-        roi_height = y_max - y_min
+        roi_width = x_max - x_min + 1
+        roi_height = y_max - y_min + 1
 
         # Validate ROI has positive dimensions
         if roi_width <= 0 or roi_height <= 0:
@@ -340,7 +340,7 @@ class Zone:
 
         # Draw edges if draw_locked_borders is enabled or vertices are unlocked
         if self.draw_locked_borders or not self.camera_mapping.lock_vertices:
-            edge_color = (128, 128, 128, 255)  # Light gray BGRA
+            edge_color = (255, 255, 255, 255)  # White BGRA
             pts = np.array(roi_vertices, dtype=np.int32)
 
             # Draw quadrilateral edges with anti-aliasing
@@ -391,11 +391,11 @@ class Zone:
 
         x_min = max(0, min(xs) - padding)
         y_min = max(0, min(ys) - padding)
-        x_max = min(frame_shape[1], max(xs) + padding)
-        y_max = min(frame_shape[0], max(ys) + padding)
+        x_max = min(frame_shape[1] - 1, max(xs) + padding)
+        y_max = min(frame_shape[0] - 1, max(ys) + padding)
 
-        roi_width = x_max - x_min
-        roi_height = y_max - y_min
+        roi_width = x_max - x_min + 1
+        roi_height = y_max - y_min + 1
 
         # Validate ROI has positive dimensions
         if roi_width <= 0 or roi_height <= 0:
@@ -425,7 +425,7 @@ class Zone:
 
         # Draw edges if draw_locked_borders is enabled or vertices are unlocked
         if self.draw_locked_borders or not self.projector_mapping.lock_vertices:
-            edge_color = (128, 128, 128, 255)  # Light gray BGRA
+            edge_color = (255, 255, 255, 255)  # White BGRA
             pts = np.array(roi_vertices, dtype=np.int32)
 
             # Draw quadrilateral edges with anti-aliasing
@@ -695,3 +695,39 @@ class Zone:
         if self.projector_mapping and self.projector_mapping.enabled and self.projector_mapping.is_calibrated:
             return True
         return False
+
+    def get_latest_camera_image_cropped(self, camera_manager) -> np.ndarray | None:
+        """Get the latest camera image cropped to the ROI.
+
+        Args:
+            camera_manager: CameraManager instance to get camera from.
+
+        Returns:
+            Cropped camera image (ROI only) or None if no camera mapping or no frame available.
+        """
+        if not self.camera_mapping or not self.camera_mapping.enabled:
+            return None
+
+        if not self.camera_mapping.roi:
+            return None
+
+        # Get camera
+        try:
+            camera = camera_manager.get_camera(self.camera_mapping.camera_name)
+        except KeyError:
+            return None
+
+        # Get latest frame
+        frame = camera.get_undistorted_frame()
+        if frame is None:
+            return None
+
+        # Crop to ROI
+        roi = self.camera_mapping.roi
+        min_x = max(0, roi['min_x'])
+        min_y = max(0, roi['min_y'])
+        max_x = min(frame.shape[1], roi['max_x'])
+        max_y = min(frame.shape[0], roi['max_y'])
+
+        cropped = frame[min_y:max_y, min_x:max_x]
+        return cropped

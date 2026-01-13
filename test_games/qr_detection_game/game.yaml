@@ -1,0 +1,20 @@
+# QR Detection Game Configuration
+
+# Game metadata
+name: "QR Detection"
+version: "1.0.0"
+author: "TTGA Team"
+description: "A game that detects QR codes in a play area and tracks their positions"
+
+# Zone requirements
+zones:
+  - internal_name: "play_area"
+    display_name: "Play Area"
+    requires_camera: true
+    requires_projector: true
+    units: "in"
+    enable_qr_detector: true
+    description: "Main play area where QR codes will be detected and tracked"
+
+# Game settings
+settings: {}

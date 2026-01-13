@@ -224,3 +224,7 @@ tmp/
 
 # Saved stuff
 saved/
+
+# User/community games (untracked)
+# test_games/ is tracked for development, games/ is for user-created games
+games/
