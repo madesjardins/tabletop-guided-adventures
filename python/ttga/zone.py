@@ -306,11 +306,11 @@ class Zone:
 
         x_min = max(0, min(xs) - padding)
         y_min = max(0, min(ys) - padding)
-        x_max = min(frame_shape[1], max(xs) + padding)
-        y_max = min(frame_shape[0], max(ys) + padding)
+        x_max = min(frame_shape[1] - 1, max(xs) + padding)
+        y_max = min(frame_shape[0] - 1, max(ys) + padding)
 
-        roi_width = x_max - x_min
-        roi_height = y_max - y_min
+        roi_width = x_max - x_min + 1
+        roi_height = y_max - y_min + 1
 
         # Validate ROI has positive dimensions
         if roi_width <= 0 or roi_height <= 0:
@@ -340,7 +340,7 @@ class Zone:
 
         # Draw edges if draw_locked_borders is enabled or vertices are unlocked
         if self.draw_locked_borders or not self.camera_mapping.lock_vertices:
-            edge_color = (128, 128, 128, 255)  # Light gray BGRA
+            edge_color = (255, 255, 255, 255)  # White BGRA
             pts = np.array(roi_vertices, dtype=np.int32)
 
             # Draw quadrilateral edges with anti-aliasing
@@ -391,11 +391,11 @@ class Zone:
 
         x_min = max(0, min(xs) - padding)
         y_min = max(0, min(ys) - padding)
-        x_max = min(frame_shape[1], max(xs) + padding)
-        y_max = min(frame_shape[0], max(ys) + padding)
+        x_max = min(frame_shape[1] - 1, max(xs) + padding)
+        y_max = min(frame_shape[0] - 1, max(ys) + padding)
 
-        roi_width = x_max - x_min
-        roi_height = y_max - y_min
+        roi_width = x_max - x_min + 1
+        roi_height = y_max - y_min + 1
 
         # Validate ROI has positive dimensions
         if roi_width <= 0 or roi_height <= 0:
@@ -425,7 +425,7 @@ class Zone:
 
         # Draw edges if draw_locked_borders is enabled or vertices are unlocked
         if self.draw_locked_borders or not self.projector_mapping.lock_vertices:
-            edge_color = (128, 128, 128, 255)  # Light gray BGRA
+            edge_color = (255, 255, 255, 255)  # White BGRA
             pts = np.array(roi_vertices, dtype=np.int32)
 
             # Draw quadrilateral edges with anti-aliasing

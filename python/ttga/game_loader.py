@@ -161,23 +161,36 @@ class GameLoader:
 
         return games
 
-    def _load_game_metadata(self, module_path: str) -> Optional[dict]:
+    def _load_game_metadata(self, module_path: str | Path) -> Optional[dict]:
         """Load game metadata without instantiating the game.
 
         Args:
-            module_path: Path to the game.py file.
+            module_path: Path to the game.py file (string or Path object).
 
         Returns:
             Metadata dictionary or None if loading failed.
         """
         try:
-            # Load the module
-            spec = importlib.util.spec_from_file_location("temp_game_module", module_path)
+            # Load the module as a package to support relative imports
+            module_path = Path(module_path) if isinstance(module_path, str) else module_path
+            game_folder = module_path.parent
+            package_name = f"temp_game_{game_folder.name}"
+
+            spec = importlib.util.spec_from_file_location(
+                package_name,
+                module_path,
+                submodule_search_locations=[str(game_folder)]
+            )
             if spec is None or spec.loader is None:
                 return None
 
             module = importlib.util.module_from_spec(spec)
+            sys.modules[package_name] = module
             spec.loader.exec_module(module)
+
+            # Clean up sys.modules after metadata extraction
+            if package_name in sys.modules:
+                del sys.modules[package_name]
 
             # Look for Game class
             if not hasattr(module, 'Game'):
@@ -220,20 +233,29 @@ class GameLoader:
             >>> game.on_load()
         """
         try:
-            # Add the game's folder to sys.path so it can import local modules
             game_folder = Path(game_info.folder_path)
-            if str(game_folder) not in sys.path:
-                sys.path.insert(0, str(game_folder))
+            package_name = f"game_{game_folder.name}"
 
-            # Load the module
+            # First, register the package in sys.modules to support relative imports
+            # Create a minimal package module
+            import types
+            package_module = types.ModuleType(package_name)
+            package_module.__path__ = [str(game_folder)]
+            package_module.__package__ = package_name
+            sys.modules[package_name] = package_module
+
+            # Now load game.py as a submodule
+            game_module_name = f"{package_name}.game"
             spec = importlib.util.spec_from_file_location(
-                f"game_{game_folder.name}",
+                game_module_name,
                 game_info.module_path
             )
+
             if spec is None or spec.loader is None:
                 return None
 
             module = importlib.util.module_from_spec(spec)
+            sys.modules[game_module_name] = module
             spec.loader.exec_module(module)
 
             # Get the Game class

@@ -35,9 +35,10 @@ if TYPE_CHECKING:
 
 from ttga.game_base import GameBase
 from ttga.game_dialog import GameDialog, ZoneRequirement
-from ttga.game_event_manager import GameEventManager
 from ttga.qr_detection import QRDetector
 from ttga.sound_mixer import Channel
+
+from .event_manager import QRDetectionEventManager
 
 
 class QRDetectionDialog(GameDialog):
@@ -200,8 +201,9 @@ class Game(GameBase):
             self.zone_requirements.append(req)
 
         self.dialog: Optional[QRDetectionDialog] = None
-        self.event_manager: Optional[GameEventManager] = None
+        self.event_manager: Optional[QRDetectionEventManager] = None
         self.qr_detectors: dict[str, QRDetector] = {}
+        self.qr_detector_connections: dict[str, object] = {}  # Store signal connections for proper cleanup
         self.is_running = False
 
         # Overlay images for visualization (zone_name -> BGRA image)
@@ -305,7 +307,7 @@ class Game(GameBase):
                         print(f"[QR Detection] Created projector overlay for zone '{zone_name}' ({width_px}x{height_px})")
 
         # Create event manager with reference to game for overlay updates
-        self.event_manager = GameEventManager(self)
+        self.event_manager = QRDetectionEventManager(self)
 
         # Connect speech recognition
         self.core.speech_final_result.connect(self.event_manager.process_game_speech)
@@ -321,12 +323,12 @@ class Game(GameBase):
                     if zone:
                         # Create QR detector with refresh rate from MainCore
                         detector = QRDetector(zone, self.core.camera_manager, self.core.qr_code_refresh_rate)
-                        # Pass zone_name to event manager via lambda
-                        detector.detections_updated.connect(
-                            lambda dets, zn=zone_name: self.event_manager.process_game_detection(dets, zn)
-                        )
+                        # Pass zone_name to event manager via lambda and store the connection
+                        connection = lambda dets, zn=zone_name: self.event_manager.process_game_detection(dets, zn)  # noqa: E731
+                        detector.detections_updated.connect(connection)
                         detector.start()
                         self.qr_detectors[internal_name] = detector
+                        self.qr_detector_connections[internal_name] = connection
                         print(f"[QR Detection] Started QR detector for zone '{zone_name}' at {self.core.qr_code_refresh_rate} Hz")
 
         self.is_running = True
@@ -341,16 +343,27 @@ class Game(GameBase):
         print("[QR Detection] Stopping game...")
 
         # Stop and disconnect QR detectors
-        for detector in self.qr_detectors.values():
+        for internal_name, detector in self.qr_detectors.items():
             detector.stop()
-            if self.event_manager:
-                detector.detections_updated.disconnect(self.event_manager.process_game_detection)
+            # Disconnect using the stored connection reference
+            connection = self.qr_detector_connections.get(internal_name)
+            if connection:
+                try:
+                    detector.detections_updated.disconnect(connection)
+                except RuntimeError:
+                    # Signal was not connected or already disconnected
+                    pass
 
         self.qr_detectors.clear()
+        self.qr_detector_connections.clear()
 
         # Disconnect speech recognition
         if self.event_manager:
-            self.core.speech_final_result.disconnect(self.event_manager.process_game_speech)
+            try:
+                self.core.speech_final_result.disconnect(self.event_manager.process_game_speech)
+            except RuntimeError:
+                # Signal was not connected or already disconnected
+                pass
             self.event_manager = None
 
         # Clear overlays

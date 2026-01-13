@@ -269,8 +269,8 @@ class ViewportWidget(QtWidgets.QLabel):
                         continue
 
                     # Calculate ROI dimensions
-                    roi_width = roi['max_x'] - roi['min_x']
-                    roi_height = roi['max_y'] - roi['min_y']
+                    roi_width = roi['max_x'] - roi['min_x'] + 1
+                    roi_height = roi['max_y'] - roi['min_y'] + 1
 
                     # Warp game overlay to camera coordinates
                     warped_overlay = cv.warpPerspective(
