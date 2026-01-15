@@ -171,45 +171,27 @@ class GameLoader:
             Metadata dictionary or None if loading failed.
         """
         try:
-            # Load the module as a package to support relative imports
+            # Load metadata from game.yaml file
             module_path = Path(module_path) if isinstance(module_path, str) else module_path
             game_folder = module_path.parent
-            package_name = f"temp_game_{game_folder.name}"
+            yaml_path = game_folder / "game.yaml"
 
-            spec = importlib.util.spec_from_file_location(
-                package_name,
-                module_path,
-                submodule_search_locations=[str(game_folder)]
-            )
-            if spec is None or spec.loader is None:
+            if not yaml_path.exists():
+                print(f"No game.yaml found in {game_folder}")
                 return None
 
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[package_name] = module
-            spec.loader.exec_module(module)
+            import yaml
+            with open(yaml_path, 'r') as f:
+                config = yaml.safe_load(f)
 
-            # Clean up sys.modules after metadata extraction
-            if package_name in sys.modules:
-                del sys.modules[package_name]
-
-            # Look for Game class
-            if not hasattr(module, 'Game'):
+            if not config:
                 return None
 
-            game_class = getattr(module, 'Game')
-
-            # Check if it's a subclass of GameBase
-            if not issubclass(game_class, GameBase):
-                return None
-
-            # Try to get metadata (we need a dummy core for this)
-            # We'll create a minimal metadata extraction
-            # For now, we'll just return a basic dict and let the actual load get full metadata
             return {
-                'name': getattr(game_class, 'GAME_NAME', None),
-                'version': getattr(game_class, 'GAME_VERSION', None),
-                'author': getattr(game_class, 'GAME_AUTHOR', None),
-                'description': getattr(game_class, 'GAME_DESCRIPTION', None)
+                'name': config.get('name'),
+                'version': config.get('version'),
+                'author': config.get('author'),
+                'description': config.get('description')
             }
 
         except Exception as e:
