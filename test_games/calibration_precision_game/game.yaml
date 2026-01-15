@@ -1,0 +1,11 @@
+name: Calibration Precision
+version: 1.0.0
+author: TTGA Team
+description: A simple game to test calibration precision by drawing a cross on the play area
+
+zones:
+  - internal_name: play_area
+    display_name: Play Area
+    requires_camera: true
+    requires_projector: true
+    units: in
