@@ -304,6 +304,12 @@ class Game(GameBase):
         """Called when the game is unloaded."""
         if self.is_running:
             self.stop_game()
+
+        # Close dialog if open
+        if self.dialog:
+            self.dialog.close()
+            self.dialog = None
+
         print("[Calibration Precision] Game unloaded")
 
     def show_dialog(self, parent=None) -> None:
