@@ -39,10 +39,10 @@ from .event_manager import CalibrationPrecisionEventManager
 class CalibrationPrecisionDialog(GameDialog):
     """Custom dialog for Calibration Precision game."""
 
-    # Signals for cross parameter changes
-    cross_position_changed = QtCore.Signal(float, float)
-    cross_length_changed = QtCore.Signal(float)
-    cross_thickness_changed = QtCore.Signal(float)
+    # Signals for grid parameter changes
+    grid_division_changed = QtCore.Signal(float)
+    grid_thickness_changed = QtCore.Signal(float)
+    grid_offset_changed = QtCore.Signal(float)
 
     def __init__(
         self,
@@ -84,8 +84,8 @@ class CalibrationPrecisionDialog(GameDialog):
 
         # Instructions
         instructions = QtWidgets.QLabel(
-            "Start the game to display a calibration cross on the play area. "
-            "Adjust the cross position, length, and thickness to test calibration precision."
+            "Start the game to display a calibration grid on the play area. "
+            "Adjust the division size, line thickness, and offset to test calibration precision."
         )
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
@@ -117,51 +117,48 @@ class CalibrationPrecisionDialog(GameDialog):
 
         layout.addSpacing(20)
 
-        # Create cross controls group
-        controls_group = QtWidgets.QGroupBox("Cross Controls")
+        # Create grid controls group
+        controls_group = QtWidgets.QGroupBox("Grid Controls")
         controls_layout = QtWidgets.QFormLayout()
 
-        # Cross position X
-        self.cross_x_spinbox = QtWidgets.QDoubleSpinBox()
-        self.cross_x_spinbox.setDecimals(4)
-        self.cross_x_spinbox.setSingleStep(0.1)
-        self.cross_x_spinbox.setEnabled(False)
-        self.cross_x_spinbox.valueChanged.connect(self._on_cross_position_changed)
-        controls_layout.addRow("Cross X (inches):", self.cross_x_spinbox)
-
-        # Cross position Y
-        self.cross_y_spinbox = QtWidgets.QDoubleSpinBox()
-        self.cross_y_spinbox.setDecimals(4)
-        self.cross_y_spinbox.setSingleStep(0.1)
-        self.cross_y_spinbox.setEnabled(False)
-        self.cross_y_spinbox.valueChanged.connect(self._on_cross_position_changed)
-        controls_layout.addRow("Cross Y (inches):", self.cross_y_spinbox)
-
-        # Cross length
-        self.cross_length_spinbox = QtWidgets.QDoubleSpinBox()
-        self.cross_length_spinbox.setDecimals(4)
-        self.cross_length_spinbox.setMinimum(0.0)
-        self.cross_length_spinbox.setMaximum(5.0)
-        self.cross_length_spinbox.setValue(2.0)
-        self.cross_length_spinbox.setSingleStep(0.1)
-        self.cross_length_spinbox.setEnabled(False)
-        self.cross_length_spinbox.valueChanged.connect(
-            lambda v: self.cross_length_changed.emit(v)
+        # Division size
+        self.division_size_spinbox = QtWidgets.QDoubleSpinBox()
+        self.division_size_spinbox.setDecimals(4)
+        self.division_size_spinbox.setMinimum(0.1)
+        self.division_size_spinbox.setMaximum(100.0)
+        self.division_size_spinbox.setValue(1.0)
+        self.division_size_spinbox.setSingleStep(0.1)
+        self.division_size_spinbox.setEnabled(False)
+        self.division_size_spinbox.valueChanged.connect(
+            lambda v: self.grid_division_changed.emit(v)
         )
-        controls_layout.addRow("Cross Length (inches):", self.cross_length_spinbox)
+        controls_layout.addRow("Division Size (inches):", self.division_size_spinbox)
 
-        # Cross thickness
-        self.cross_thickness_spinbox = QtWidgets.QDoubleSpinBox()
-        self.cross_thickness_spinbox.setDecimals(4)
-        self.cross_thickness_spinbox.setMinimum(0.0)
-        self.cross_thickness_spinbox.setMaximum(1.0)
-        self.cross_thickness_spinbox.setValue(0.1)
-        self.cross_thickness_spinbox.setSingleStep(0.01)
-        self.cross_thickness_spinbox.setEnabled(False)
-        self.cross_thickness_spinbox.valueChanged.connect(
-            lambda v: self.cross_thickness_changed.emit(v)
+        # Line thickness
+        self.line_thickness_spinbox = QtWidgets.QDoubleSpinBox()
+        self.line_thickness_spinbox.setDecimals(4)
+        self.line_thickness_spinbox.setMinimum(0.0001)
+        self.line_thickness_spinbox.setMaximum(1.0)
+        self.line_thickness_spinbox.setValue(0.0625)
+        self.line_thickness_spinbox.setSingleStep(0.0625)
+        self.line_thickness_spinbox.setEnabled(False)
+        self.line_thickness_spinbox.valueChanged.connect(
+            lambda v: self.grid_thickness_changed.emit(v)
         )
-        controls_layout.addRow("Cross Thickness (inches):", self.cross_thickness_spinbox)
+        controls_layout.addRow("Line Thickness (inches):", self.line_thickness_spinbox)
+
+        # Offset
+        self.offset_spinbox = QtWidgets.QDoubleSpinBox()
+        self.offset_spinbox.setDecimals(4)
+        self.offset_spinbox.setMinimum(0.0)
+        self.offset_spinbox.setMaximum(100.0)
+        self.offset_spinbox.setValue(0.5)
+        self.offset_spinbox.setSingleStep(0.1)
+        self.offset_spinbox.setEnabled(False)
+        self.offset_spinbox.valueChanged.connect(
+            lambda v: self.grid_offset_changed.emit(v)
+        )
+        controls_layout.addRow("Offset (inches):", self.offset_spinbox)
 
         controls_group.setLayout(controls_layout)
         layout.addWidget(controls_group)
@@ -203,11 +200,10 @@ class CalibrationPrecisionDialog(GameDialog):
             self.start_game_button.setEnabled(False)
             self.stop_game_button.setEnabled(True)
 
-            # Enable cross controls
-            self.cross_x_spinbox.setEnabled(True)
-            self.cross_y_spinbox.setEnabled(True)
-            self.cross_length_spinbox.setEnabled(True)
-            self.cross_thickness_spinbox.setEnabled(True)
+            # Enable grid controls
+            self.division_size_spinbox.setEnabled(True)
+            self.line_thickness_spinbox.setEnabled(True)
+            self.offset_spinbox.setEnabled(True)
         else:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -225,11 +221,10 @@ class CalibrationPrecisionDialog(GameDialog):
         self.start_game_button.setEnabled(True)
         self.stop_game_button.setEnabled(False)
 
-        # Disable cross controls
-        self.cross_x_spinbox.setEnabled(False)
-        self.cross_y_spinbox.setEnabled(False)
-        self.cross_length_spinbox.setEnabled(False)
-        self.cross_thickness_spinbox.setEnabled(False)
+        # Disable grid controls
+        self.division_size_spinbox.setEnabled(False)
+        self.line_thickness_spinbox.setEnabled(False)
+        self.offset_spinbox.setEnabled(False)
 
     def set_zone_dimensions(self, width: float, height: float) -> None:
         """Set the zone dimensions to update spinbox ranges.
@@ -241,26 +236,11 @@ class CalibrationPrecisionDialog(GameDialog):
         self.zone_width = width
         self.zone_height = height
 
-        # Update spinbox ranges
-        self.cross_x_spinbox.setMinimum(0.0)
-        self.cross_x_spinbox.setMaximum(width)
-        self.cross_x_spinbox.setValue(width / 2.0)
-
-        self.cross_y_spinbox.setMinimum(0.0)
-        self.cross_y_spinbox.setMaximum(height)
-        self.cross_y_spinbox.setValue(height / 2.0)
-
-    def _on_cross_position_changed(self) -> None:
-        """Handle cross position change."""
-        x = self.cross_x_spinbox.value()
-        y = self.cross_y_spinbox.value()
-        self.cross_position_changed.emit(x, y)
-
 
 class Game(GameBase):
     """Calibration Precision game for testing calibration accuracy.
 
-    This game draws a white cross on the play area to help verify that
+    This game draws a calibration grid on the play area to help verify that
     camera and projector calibrations are accurate.
     """
 
@@ -293,11 +273,10 @@ class Game(GameBase):
         self.event_manager: Optional[CalibrationPrecisionEventManager] = None
         self.is_running = False
 
-        # Cross parameters (in inches)
-        self.cross_x = 0.0
-        self.cross_y = 0.0
-        self.cross_length = 2.0
-        self.cross_thickness = 0.1
+        # Grid parameters (in inches)
+        self.division_size = 1.0
+        self.line_thickness = 0.0625
+        self.offset = 0.5
 
         # Overlay images for visualization (zone_name -> BGRA image)
         self.camera_overlays: dict[str, np.ndarray] = {}
@@ -345,9 +324,9 @@ class Game(GameBase):
             )
 
             # Connect dialog signals
-            self.dialog.cross_position_changed.connect(self._on_cross_position_changed)
-            self.dialog.cross_length_changed.connect(self._on_cross_length_changed)
-            self.dialog.cross_thickness_changed.connect(self._on_cross_thickness_changed)
+            self.dialog.grid_division_changed.connect(self._on_division_size_changed)
+            self.dialog.grid_thickness_changed.connect(self._on_line_thickness_changed)
+            self.dialog.grid_offset_changed.connect(self._on_offset_changed)
 
         self.dialog.show()
         self.dialog.raise_()
@@ -379,9 +358,6 @@ class Game(GameBase):
         # Update dialog with zone dimensions
         if self.dialog:
             self.dialog.set_zone_dimensions(zone.width, zone.height)
-            # Initialize cross position to center
-            self.cross_x = zone.width / 2.0
-            self.cross_y = zone.height / 2.0
 
         # Initialize overlays for each zone
         width_px = int(zone.width * zone.resolution)
@@ -407,8 +383,8 @@ class Game(GameBase):
 
         self.is_running = True
 
-        # Draw initial cross
-        self._update_cross()
+        # Draw initial grid
+        self._update_grid()
 
         print("[Calibration Precision] Game started successfully")
         return True
@@ -460,40 +436,38 @@ class Game(GameBase):
         """
         return self.projector_overlays.get(zone_name)
 
-    @QtCore.Slot(float, float)
-    def _on_cross_position_changed(self, x: float, y: float) -> None:
-        """Handle cross position change.
+    @QtCore.Slot(float)
+    def _on_division_size_changed(self, size: float) -> None:
+        """Handle division size change.
 
         Args:
-            x: X position in inches.
-            y: Y position in inches.
+            size: Division size in inches.
         """
-        self.cross_x = x
-        self.cross_y = y
-        self._update_cross()
+        self.division_size = size
+        self._update_grid()
 
     @QtCore.Slot(float)
-    def _on_cross_length_changed(self, length: float) -> None:
-        """Handle cross length change.
+    def _on_line_thickness_changed(self, thickness: float) -> None:
+        """Handle line thickness change.
 
         Args:
-            length: Cross length in inches.
+            thickness: Line thickness in inches.
         """
-        self.cross_length = length
-        self._update_cross()
+        self.line_thickness = thickness
+        self._update_grid()
 
     @QtCore.Slot(float)
-    def _on_cross_thickness_changed(self, thickness: float) -> None:
-        """Handle cross thickness change.
+    def _on_offset_changed(self, offset: float) -> None:
+        """Handle offset change.
 
         Args:
-            thickness: Cross thickness in inches.
+            offset: Offset in inches.
         """
-        self.cross_thickness = thickness
-        self._update_cross()
+        self.offset = offset
+        self._update_grid()
 
-    def _update_cross(self) -> None:
-        """Update the cross drawing on all overlays."""
+    def _update_grid(self) -> None:
+        """Update the grid drawing on all overlays."""
         if not self.is_running:
             return
 
@@ -516,30 +490,32 @@ class Game(GameBase):
             projector_overlay[:] = 0
 
         # Convert measurements to pixels
-        center_x_px = int(self.cross_x * zone.resolution)
-        center_y_px = int(self.cross_y * zone.resolution)
-        half_length_px = int(self.cross_length / 2.0 * zone.resolution)
-        thickness_px = max(1, int(self.cross_thickness * zone.resolution))
+        division_px = int(self.division_size * zone.resolution)
+        thickness_px = max(1, int(self.line_thickness * zone.resolution))
+        offset_px = int(self.offset * zone.resolution)
 
-        # Draw horizontal line
-        x1 = center_x_px - half_length_px
-        x2 = center_x_px + half_length_px
-        y = center_y_px
+        width_px = int(zone.width * zone.resolution)
+        height_px = int(zone.height * zone.resolution)
 
-        # Draw vertical line
-        y1 = center_y_px - half_length_px
-        y2 = center_y_px + half_length_px
-        x = center_x_px
+        # White color in BGRA format for projector
+        white_color = (255, 255, 255, 255)
+        # Green color in BGRA format for camera
+        green_color = (0, 255, 0, 255)
 
-        # White color in BGRA format
-        color = (255, 255, 255, 255)
+        # Draw vertical lines
+        x = offset_px
+        while x < width_px:
+            if camera_overlay is not None:
+                cv2.line(camera_overlay, (x, 0), (x, height_px - 1), green_color, thickness_px)
+            if projector_overlay is not None:
+                cv2.line(projector_overlay, (x, 0), (x, height_px - 1), white_color, thickness_px)
+            x += division_px
 
-        # Draw on camera overlay (green)
-        if camera_overlay is not None:
-            cv2.line(camera_overlay, (x1, y), (x2, y), (0, 255, 0, 255), thickness_px)
-            cv2.line(camera_overlay, (x, y1), (x, y2), (0, 255, 0, 255), thickness_px)
-
-        # Draw on projector overlay (white)
-        if projector_overlay is not None:
-            cv2.line(projector_overlay, (x1, y), (x2, y), color, thickness_px)
-            cv2.line(projector_overlay, (x, y1), (x, y2), color, thickness_px)
+        # Draw horizontal lines
+        y = offset_px
+        while y < height_px:
+            if camera_overlay is not None:
+                cv2.line(camera_overlay, (0, y), (width_px - 1, y), green_color, thickness_px)
+            if projector_overlay is not None:
+                cv2.line(projector_overlay, (0, y), (width_px - 1, y), white_color, thickness_px)
+            y += division_px
