@@ -99,8 +99,9 @@ class ProjectorViewport(QtWidgets.QLabel):
             zones = self._zone_manager.get_zones_with_projector_mapping(self.projector_name)
 
             if zones:
-                # Start with black base image
-                image = np.zeros((height, width, 3), dtype=np.uint8)
+                # Create black base QImage directly (more efficient than numpy + copy)
+                qimage = QtGui.QImage(width, height, QtGui.QImage.Format.Format_BGR888)
+                qimage.fill(QtCore.Qt.GlobalColor.black)
 
                 # Composite zone overlays (if draw_locked_borders is enabled)
                 overlays_to_composite = []
@@ -108,9 +109,6 @@ class ProjectorViewport(QtWidgets.QLabel):
                     overlay_data = zone.get_projector_overlay((height, width, 3))
                     if overlay_data is not None:
                         overlays_to_composite.append(overlay_data)
-
-                # Convert base image to QImage once
-                qimage = QtGui.QImage(image.data, width, height, width * 3, QtGui.QImage.Format.Format_BGR888).copy()
 
                 # Use Qt QPainter for fast compositing (22x faster than NumPy)
                 if overlays_to_composite:
@@ -171,8 +169,8 @@ class ProjectorViewport(QtWidgets.QLabel):
                         # Ensure we don't go out of frame bounds
                         x_start = max(0, roi['min_x'])
                         y_start = max(0, roi['min_y'])
-                        x_end = min(image.shape[1], roi['max_x'])
-                        y_end = min(image.shape[0], roi['max_y'])
+                        x_end = min(qimage.width(), roi['max_x'])
+                        y_end = min(qimage.height(), roi['max_y'])
 
                         # Calculate actual dimensions after bounds checking
                         actual_width = x_end - x_start

@@ -88,8 +88,8 @@ class Camera(QtCore.QObject):
         # Increment and wrap buffer index
         self._buffer_index = (self._buffer_index + 1) % 3
 
-        # Store frame in buffer
-        self._frame_buffer[self._buffer_index] = frame.copy()
+        # Store frame in buffer (no copy needed - frame is never modified)
+        self._frame_buffer[self._buffer_index] = frame
 
         # Update current index
         self._current_index = self._buffer_index

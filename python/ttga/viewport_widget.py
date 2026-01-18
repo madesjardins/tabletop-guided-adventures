@@ -180,31 +180,43 @@ class ViewportWidget(QtWidgets.QLabel):
             self.reset_zoom()
             self._last_camera_ids = current_camera_ids.copy()
 
-        # Composite zone overlays on frames before processing
-        frames_with_overlays = self._composite_zone_overlays(valid_frames)
+        # Composite zone overlays on frames (returns QImages)
+        qimages_with_overlays = self._composite_zone_overlays(valid_frames)
 
-        # Compose frames into grid
-        composed_frame = self._compose_frames(frames_with_overlays)
+        # Compose QImages into grid (returns QImage)
+        composed_qimage = self._compose_frames(qimages_with_overlays)
 
-        # Convert to QImage and display
-        self._display_frame(composed_frame)
+        # Display QImage directly (no conversion!)
+        self._display_qimage(composed_qimage)
 
-    def _composite_zone_overlays(self, frames: list[np.ndarray]) -> list[np.ndarray]:
+    def _composite_zone_overlays(self, frames: list[np.ndarray]) -> list[QtGui.QImage]:
         """Composite zone overlays on camera frames.
 
         Args:
-            frames: List of camera frames.
+            frames: List of camera frames (numpy BGR).
 
         Returns:
-            List of frames with zone overlays composited.
+            List of QImages with zone overlays composited.
         """
         if self._zone_manager is None or self._get_camera_names_callback is None:
-            return frames
+            # No zone manager - just convert frames to QImages
+            result = []
+            for frame in frames:
+                height, width = frame.shape[:2]
+                qimage = QtGui.QImage(frame.data, width, height, width * 3, QtGui.QImage.Format.Format_BGR888).copy()
+                result.append(qimage)
+            return result
 
         # Get camera names
         camera_names = self._get_camera_names_callback()
         if len(camera_names) != len(frames):
-            return frames
+            # Mismatch - just convert frames to QImages
+            result = []
+            for frame in frames:
+                height, width = frame.shape[:2]
+                qimage = QtGui.QImage(frame.data, width, height, width * 3, QtGui.QImage.Format.Format_BGR888).copy()
+                result.append(qimage)
+            return result
 
         result_frames = []
         for frame, camera_name in zip(frames, camera_names):
@@ -212,7 +224,10 @@ class ViewportWidget(QtWidgets.QLabel):
             zones = self._zone_manager.get_zones_with_camera_mapping(camera_name)
 
             if not zones:
-                result_frames.append(frame)
+                # No zones - convert frame to QImage
+                height, width = frame.shape[:2]
+                qimage = QtGui.QImage(frame.data, width, height, width * 3, QtGui.QImage.Format.Format_BGR888).copy()
+                result_frames.append(qimage)
                 continue
 
             # Collect overlays first to avoid unnecessary frame copy
@@ -250,19 +265,17 @@ class ViewportWidget(QtWidgets.QLabel):
 
                 painter.end()
 
-                # Convert back to numpy BGR (needed for grid composition)
-                ptr = qimage.constBits()
-                bytes_per_line = qimage.bytesPerLine()
-                arr = np.array(ptr).reshape((height, bytes_per_line))
-                # Extract only the actual image data (remove padding if any)
-                composited = arr[:, :width * 3].reshape((height, width, 3)).copy()
-                result_frames.append(composited)
+                # Keep as QImage (no numpy conversion!)
+                result_frames.append(qimage)
             else:
-                result_frames.append(frame)
+                # Convert frame to QImage
+                height, width = frame.shape[:2]
+                qimage = QtGui.QImage(frame.data, width, height, width * 3, QtGui.QImage.Format.Format_BGR888).copy()
+                result_frames.append(qimage)
 
             # Composite game overlays after zone overlays
             if self._main_core is not None:
-                composited_with_game = result_frames[-1]
+                qimage_with_game = result_frames[-1]
                 game_overlays_to_composite = []
 
                 for zone in zones:
@@ -299,8 +312,8 @@ class ViewportWidget(QtWidgets.QLabel):
                     # Ensure we don't go out of frame bounds
                     x_start = max(0, roi['min_x'])
                     y_start = max(0, roi['min_y'])
-                    x_end = min(composited_with_game.shape[1], roi['max_x'])
-                    y_end = min(composited_with_game.shape[0], roi['max_y'])
+                    x_end = min(qimage_with_game.width(), roi['max_x'])
+                    y_end = min(qimage_with_game.height(), roi['max_y'])
 
                     # Calculate actual dimensions after bounds checking
                     actual_width = x_end - x_start
@@ -316,13 +329,8 @@ class ViewportWidget(QtWidgets.QLabel):
 
                 # Use Qt QPainter for fast compositing if we have game overlays
                 if game_overlays_to_composite:
-                    height, width = composited_with_game.shape[:2]
-
-                    # Convert frame to QImage
-                    qimage = QtGui.QImage(composited_with_game.data, width, height, width * 3, QtGui.QImage.Format.Format_BGR888).copy()
-
-                    # Create painter
-                    painter = QtGui.QPainter(qimage)
+                    # Create painter on existing QImage
+                    painter = QtGui.QPainter(qimage_with_game)
                     painter.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
 
                     for warped_crop, x_pos, y_pos in game_overlays_to_composite:
@@ -340,26 +348,18 @@ class ViewportWidget(QtWidgets.QLabel):
 
                     painter.end()
 
-                    # Convert back to numpy BGR (needed for grid composition)
-                    ptr = qimage.constBits()
-                    bytes_per_line = qimage.bytesPerLine()
-                    arr = np.array(ptr).reshape((height, bytes_per_line))
-                    # Extract only the actual image data (remove padding if any)
-                    composited_with_game = arr[:, :width * 3].reshape((height, width, 3)).copy()
-
-                    # Update the result with game overlays composited
-                    result_frames[-1] = composited_with_game
+                    # Keep as QImage (no numpy conversion!)
 
         return result_frames
 
-    def _compose_frames(self, frames: list[np.ndarray]) -> np.ndarray:
-        """Compose multiple frames into a single grid layout.
+    def _compose_frames(self, frames: list[QtGui.QImage]) -> QtGui.QImage:
+        """Compose multiple QImages into a single grid layout.
 
         Args:
-            frames: List of frames to compose.
+            frames: List of QImages to compose.
 
         Returns:
-            Composed frame as numpy array.
+            Composed frame as QImage.
         """
         num_frames = len(frames)
 
@@ -373,14 +373,15 @@ class ViewportWidget(QtWidgets.QLabel):
             cols = 1
 
             # Process single frame with zoom/pan on FULL RESOLUTION first
-            frame = frames[0]
+            qimage = frames[0]
 
             # Apply zoom/pan on full resolution if set
             if 0 in self._zoom_states:
-                frame = self._apply_zoom_pan_full_res(frame, self._zoom_states[0])
+                qimage = self._apply_zoom_pan_qimage(qimage, self._zoom_states[0])
 
             # Now scale to fit viewport
-            h, w = frame.shape[:2]
+            w = qimage.width()
+            h = qimage.height()
             aspect = w / h
             cell_aspect = cell_width / cell_height
 
@@ -391,13 +392,18 @@ class ViewportWidget(QtWidgets.QLabel):
                 new_h = cell_height
                 new_w = int(cell_height * aspect)
 
-            resized = cv.resize(frame, (new_w, new_h), interpolation=cv.INTER_LINEAR)
+            # Scale QImage
+            resized = qimage.scaled(new_w, new_h, QtCore.Qt.AspectRatioMode.IgnoreAspectRatio, QtCore.Qt.TransformationMode.SmoothTransformation)
 
-            # Create cell with black padding
-            cell = np.zeros((cell_height, cell_width, 3), dtype=np.uint8)
+            # Create cell with black padding using QPainter
+            cell = QtGui.QImage(cell_width, cell_height, QtGui.QImage.Format.Format_BGR888)
+            cell.fill(QtCore.Qt.GlobalColor.black)
+
+            painter = QtGui.QPainter(cell)
             y_offset = (cell_height - new_h) // 2
             x_offset = (cell_width - new_w) // 2
-            cell[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = resized
+            painter.drawImage(x_offset, y_offset, resized)
+            painter.end()
 
             # Store layout info
             self._current_rows = rows
@@ -430,13 +436,14 @@ class ViewportWidget(QtWidgets.QLabel):
 
         # Resize frames to fit cells
         resized_frames = []
-        for cell_idx, frame in enumerate(frames):
+        for cell_idx, qimage in enumerate(frames):
             # Apply zoom/pan on FULL RESOLUTION first if set for this cell
             if cell_idx in self._zoom_states:
-                frame = self._apply_zoom_pan_full_res(frame, self._zoom_states[cell_idx])
+                qimage = self._apply_zoom_pan_qimage(qimage, self._zoom_states[cell_idx])
 
             # Calculate aspect-preserving resize
-            h, w = frame.shape[:2]
+            w = qimage.width()
+            h = qimage.height()
             aspect = w / h
             cell_aspect = cell_width / cell_height
 
@@ -449,29 +456,41 @@ class ViewportWidget(QtWidgets.QLabel):
                 new_h = cell_height
                 new_w = int(cell_height * aspect)
 
-            resized = cv.resize(frame, (new_w, new_h), interpolation=cv.INTER_LINEAR)
+            # Scale QImage
+            resized = qimage.scaled(new_w, new_h, QtCore.Qt.AspectRatioMode.IgnoreAspectRatio, QtCore.Qt.TransformationMode.SmoothTransformation)
 
-            # Create cell with black padding
-            cell = np.zeros((cell_height, cell_width, 3), dtype=np.uint8)
+            # Create cell with black padding using QPainter
+            cell = QtGui.QImage(cell_width, cell_height, QtGui.QImage.Format.Format_BGR888)
+            cell.fill(QtCore.Qt.GlobalColor.black)
+
+            painter = QtGui.QPainter(cell)
             y_offset = (cell_height - new_h) // 2
             x_offset = (cell_width - new_w) // 2
-            cell[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = resized
+            painter.drawImage(x_offset, y_offset, resized)
+            painter.end()
 
             resized_frames.append(cell)
 
         # Pad with black frames if needed
         total_cells = rows * cols
         while len(resized_frames) < total_cells:
-            resized_frames.append(np.zeros((cell_height, cell_width, 3), dtype=np.uint8))
+            black_cell = QtGui.QImage(cell_width, cell_height, QtGui.QImage.Format.Format_BGR888)
+            black_cell.fill(QtCore.Qt.GlobalColor.black)
+            resized_frames.append(black_cell)
 
-        # Compose grid
-        grid_rows = []
+        # Compose grid using QPainter
+        composed = QtGui.QImage(viewport_width, viewport_height, QtGui.QImage.Format.Format_BGR888)
+        composed.fill(QtCore.Qt.GlobalColor.black)
+
+        painter = QtGui.QPainter(composed)
         for r in range(rows):
-            row_frames = resized_frames[r * cols:(r + 1) * cols]
-            row = np.hstack(row_frames)
-            grid_rows.append(row)
-
-        composed = np.vstack(grid_rows)
+            for c in range(cols):
+                idx = r * cols + c
+                if idx < len(resized_frames):
+                    x_pos = c * cell_width
+                    y_pos = r * cell_height
+                    painter.drawImage(x_pos, y_pos, resized_frames[idx])
+        painter.end()
 
         # Store current grid layout for mouse event handling
         self._current_rows = rows
@@ -480,6 +499,44 @@ class ViewportWidget(QtWidgets.QLabel):
         self._cell_height = cell_height
 
         return composed
+
+    def _apply_zoom_pan_qimage(self, qimage: QtGui.QImage, zoom_state: dict[str, float]) -> QtGui.QImage:
+        """Apply zoom and pan to a QImage by extracting ROI.
+
+        Args:
+            qimage: Input QImage.
+            zoom_state: Zoom state dict with zoom, center_x, center_y, pan_x, pan_y.
+
+        Returns:
+            Cropped ROI QImage.
+        """
+        zoom_factor = zoom_state['zoom']
+        center_x = zoom_state['center_x']
+        center_y = zoom_state['center_y']
+        pan_x = zoom_state.get('pan_x', 0.0)
+        pan_y = zoom_state.get('pan_y', 0.0)
+
+        w = qimage.width()
+        h = qimage.height()
+
+        # Calculate crop region centered on zoom point with pan offset
+        crop_w = int(w / zoom_factor)
+        crop_h = int(h / zoom_factor)
+
+        # Apply pan offset (normalized to image coordinates)
+        center_x_px = center_x * w + pan_x * w
+        center_y_px = center_y * h + pan_y * h
+
+        # Calculate crop coordinates
+        x1 = int(center_x_px - crop_w / 2)
+        y1 = int(center_y_px - crop_h / 2)
+
+        # Clamp to image bounds
+        x1 = max(0, min(x1, w - crop_w))
+        y1 = max(0, min(y1, h - crop_h))
+
+        # Return cropped QImage
+        return qimage.copy(x1, y1, crop_w, crop_h)
 
     def _apply_zoom_pan_full_res(self, image: np.ndarray, zoom_state: dict[str, float]) -> np.ndarray:
         """Apply zoom and pan to a full resolution image by extracting ROI.
@@ -570,8 +627,27 @@ class ViewportWidget(QtWidgets.QLabel):
 
         return resized
 
+    def _display_qimage(self, qimage: QtGui.QImage) -> None:
+        """Display a QImage directly in the viewport (optimized - no conversion).
+
+        Args:
+            qimage: QImage to display (BGR format).
+        """
+        # Convert BGR QImage to RGB for display
+        rgb_qimage = qimage.convertToFormat(QtGui.QImage.Format.Format_RGB888)
+        pixmap = QtGui.QPixmap.fromImage(rgb_qimage)
+
+        # Scale to fit viewport while maintaining aspect ratio
+        scaled_pixmap = pixmap.scaled(
+            self.size(),
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation
+        )
+
+        self.setPixmap(scaled_pixmap)
+
     def _display_frame(self, frame: np.ndarray) -> None:
-        """Display a frame in the viewport.
+        """Display a numpy frame in the viewport (legacy method).
 
         Args:
             frame: Frame to display (BGR format).
