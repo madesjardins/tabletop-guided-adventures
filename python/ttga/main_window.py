@@ -929,9 +929,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # Load camera mapping
         self.zone_camera_enabled_checkbox.blockSignals(True)
         if zone.camera_mapping:
-            # Set checkbox based on enabled flag
-            self.zone_camera_enabled_checkbox.setChecked(zone.camera_mapping.enabled)
-            self.camera_section.setVisible(zone.camera_mapping.enabled)
+            # Set checkbox based on enabled flag (default to True if None)
+            enabled = zone.camera_mapping.enabled if zone.camera_mapping.enabled is not None else True
+            self.zone_camera_enabled_checkbox.setChecked(enabled)
+            self.camera_section.setVisible(enabled)
             self.zone_camera_mapping_group.setVisible(True)
 
             self._update_camera_combo()
@@ -981,9 +982,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # Load projector mapping
         self.zone_projector_enabled_checkbox.blockSignals(True)
         if zone.projector_mapping:
-            # Set checkbox based on enabled flag
-            self.zone_projector_enabled_checkbox.setChecked(zone.projector_mapping.enabled)
-            self.projector_section.setVisible(zone.projector_mapping.enabled)
+            # Set checkbox based on enabled flag (default to True if None)
+            enabled = zone.projector_mapping.enabled if zone.projector_mapping.enabled is not None else True
+            self.zone_projector_enabled_checkbox.setChecked(enabled)
+            self.projector_section.setVisible(enabled)
             self.zone_projector_mapping_group.setVisible(True)
 
             self._update_projector_combo()
@@ -1112,10 +1114,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         is_calibrated = zone.is_calibrated()
 
-        # Check if any mapping is enabled
-        has_enabled_mapping = (
-            (zone.camera_mapping and zone.camera_mapping.enabled) or
-            (zone.projector_mapping and zone.projector_mapping.enabled)
+        # Check if any mapping is enabled (handle None as False)
+        has_enabled_mapping = bool(
+            (zone.camera_mapping and zone.camera_mapping.enabled is True) or
+            (zone.projector_mapping and zone.projector_mapping.enabled is True)
         )
 
         # Hide calibration buttons if no mappings are enabled

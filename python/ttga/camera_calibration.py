@@ -127,7 +127,7 @@ class UndistortRectification:
         # Remap the frame using precomputed maps
         undist_frame = cv.remap(frame, self.mapx, self.mapy, cv.INTER_LINEAR)
 
-        # Crop to ROI
+        # Crop to ROI (copy needed to ensure C-contiguous memory for QImage)
         x, y, w, h = self.roi
         return undist_frame[y:y + h, x:x + w].copy()
 
