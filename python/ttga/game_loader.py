@@ -42,6 +42,7 @@ class GameInfo:
         module_path: Path to the game's module file.
         folder_path: Path to the game's folder.
         is_test_game: True if from test_games/, False if from games/.
+        allow_locked_corner_adjustment: True if game allows corner adjustments when calibrated.
     """
 
     def __init__(
@@ -52,7 +53,8 @@ class GameInfo:
         description: str,
         module_path: str,
         folder_path: str,
-        is_test_game: bool
+        is_test_game: bool,
+        allow_locked_corner_adjustment: bool = False
     ) -> None:
         """Initialize game info.
 
@@ -64,6 +66,7 @@ class GameInfo:
             module_path: Path to the game's module file.
             folder_path: Path to the game's folder.
             is_test_game: True if from test_games/, False if from games/.
+            allow_locked_corner_adjustment: True if game allows corner adjustments when calibrated.
         """
         self.name = name
         self.version = version
@@ -72,6 +75,7 @@ class GameInfo:
         self.module_path = module_path
         self.folder_path = folder_path
         self.is_test_game = is_test_game
+        self.allow_locked_corner_adjustment = allow_locked_corner_adjustment
 
     def __str__(self) -> str:
         """String representation of game info."""
@@ -154,7 +158,8 @@ class GameLoader:
                         description=metadata.get('description', ''),
                         module_path=str(game_file),
                         folder_path=str(item),
-                        is_test_game=is_test_game
+                        is_test_game=is_test_game,
+                        allow_locked_corner_adjustment=metadata.get('allow_locked_corner_adjustment', False)
                     ))
             except Exception as e:
                 print(f"Error loading game metadata from {game_file}: {e}")
@@ -191,7 +196,8 @@ class GameLoader:
                 'name': config.get('name'),
                 'version': config.get('version'),
                 'author': config.get('author'),
-                'description': config.get('description')
+                'description': config.get('description'),
+                'allow_locked_corner_adjustment': config.get('allow_locked_corner_adjustment', False)
             }
 
         except Exception as e:
