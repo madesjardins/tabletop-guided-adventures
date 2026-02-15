@@ -525,3 +525,31 @@ class Game(GameBase):
             if projector_overlay is not None:
                 cv2.line(projector_overlay, (0, y), (width_px - 1, y), white_color, thickness_px)
             y += division_px
+
+        # Draw corner color markers to help identify corners during adjustment
+        # Corner colors match the vertex colors: P0=Cyan, P1=Magenta, P2=Yellow, P3=White
+        corner_size_inches = 0.25  # Quarter inch square
+        corner_size_px = int(corner_size_inches * zone.resolution)
+
+        # Corner colors in BGRA format
+        corner_colors = [
+            (255, 255, 0, 255),    # P0: Cyan (top-left, 0,0)
+            (255, 0, 255, 255),    # P1: Magenta (top-right, width,0)
+            (0, 255, 255, 255),    # P2: Yellow (bottom-right, width,height)
+            (255, 255, 255, 255)   # P3: White (bottom-left, 0,height)
+        ]
+
+        # Corner positions in game coordinates (pixels)
+        corners = [
+            (0, 0),                                    # P0: top-left
+            (width_px - corner_size_px, 0),            # P1: top-right
+            (width_px - corner_size_px, height_px - corner_size_px),  # P2: bottom-right
+            (0, height_px - corner_size_px)            # P3: bottom-left
+        ]
+
+        # Draw corner squares on both overlays
+        for (x, y), color in zip(corners, corner_colors):
+            if camera_overlay is not None:
+                cv2.rectangle(camera_overlay, (x, y), (x + corner_size_px, y + corner_size_px), color, -1)
+            if projector_overlay is not None:
+                cv2.rectangle(projector_overlay, (x, y), (x + corner_size_px, y + corner_size_px), color, -1)

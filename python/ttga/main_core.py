@@ -240,6 +240,16 @@ class MainCore(QtCore.QObject):
             return None
         return self.current_game.get_projector_overlay(zone_name)
 
+    def allows_locked_corner_adjustment(self) -> bool:
+        """Check if the current game allows corner adjustments when calibrated.
+
+        Returns:
+            True if current game allows corner adjustments with locked vertices, False otherwise.
+        """
+        if self.current_game_info is None:
+            return False
+        return self.current_game_info.allow_locked_corner_adjustment
+
     def release_all(self) -> None:
         """Release all resources."""
         # Unload current game

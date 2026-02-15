@@ -1146,7 +1146,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.zone_camera_lock_vertices_checkbox.setChecked(True)
 
             # Vertex spinboxes disabled when calibrated or locked
-            locked_or_calibrated = is_calibrated or zone.camera_mapping.lock_vertices
+            # UNLESS game allows locked corner adjustment
+            allows_corner_adjustment = self.core.allows_locked_corner_adjustment()
+            if allows_corner_adjustment and is_calibrated:
+                # Allow adjustment even when locked/calibrated
+                locked_or_calibrated = zone.camera_mapping.lock_vertices and not is_calibrated
+            else:
+                locked_or_calibrated = is_calibrated or zone.camera_mapping.lock_vertices
+
             self.zone_camera_p0_x.setEnabled(not locked_or_calibrated)
             self.zone_camera_p0_y.setEnabled(not locked_or_calibrated)
             self.zone_camera_p1_x.setEnabled(not locked_or_calibrated)
@@ -1166,7 +1173,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.zone_projector_lock_vertices_checkbox.setChecked(True)
 
             # Vertex spinboxes disabled when calibrated or locked
-            locked_or_calibrated = is_calibrated or zone.projector_mapping.lock_vertices
+            # UNLESS game allows locked corner adjustment
+            allows_corner_adjustment = self.core.allows_locked_corner_adjustment()
+            if allows_corner_adjustment and is_calibrated:
+                # Allow adjustment even when locked/calibrated
+                locked_or_calibrated = zone.projector_mapping.lock_vertices and not is_calibrated
+            else:
+                locked_or_calibrated = is_calibrated or zone.projector_mapping.lock_vertices
+
             self.zone_projector_p0_x.setEnabled(not locked_or_calibrated)
             self.zone_projector_p0_y.setEnabled(not locked_or_calibrated)
             self.zone_projector_p1_x.setEnabled(not locked_or_calibrated)
@@ -1307,6 +1321,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 (self.zone_camera_p3_x.value(), self.zone_camera_p3_y.value())
             ]
             zone.camera_mapping.invalidate_overlay()
+
+            # If game allows locked corner adjustment and zone is calibrated,
+            # automatically uncalibrate and recalibrate
+            if self.core.allows_locked_corner_adjustment() and zone.is_calibrated():
+                zone.uncalibrate()
+                try:
+                    zone.calibrate()
+                except Exception as e:
+                    print(f"Error recalibrating zone {zone.name}: {e}")
 
     @QtCore.Slot(str)
     def _on_viewport_vertex_updated(self, zone_name: str) -> None:
@@ -1463,6 +1486,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 (self.zone_projector_p3_x.value(), self.zone_projector_p3_y.value())
             ]
             zone.projector_mapping.invalidate_overlay()
+
+            # If game allows locked corner adjustment and zone is calibrated,
+            # automatically uncalibrate and recalibrate
+            if self.core.allows_locked_corner_adjustment() and zone.is_calibrated():
+                zone.uncalibrate()
+                try:
+                    zone.calibrate()
+                except Exception as e:
+                    print(f"Error recalibrating zone {zone.name}: {e}")
 
     @QtCore.Slot(int)
     def _on_zone_projector_lock_vertices_changed(self, state: int) -> None:
@@ -2491,6 +2523,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.unload_game_action.setEnabled(True)
         self.setWindowTitle(f"Tabletop Guided Adventures - {game_name}")
 
+        # Refresh zone UI state to apply game-specific overrides
+        self._update_zone_ui_state()
+
         # Auto-open game dialog
         if self.core.current_game:
             self.core.current_game.show_dialog(parent=self)
@@ -2500,6 +2535,9 @@ class MainWindow(QtWidgets.QMainWindow):
         """Handle game unloaded signal."""
         self.unload_game_action.setEnabled(False)
         self.setWindowTitle("Tabletop Guided Adventures")
+
+        # Refresh zone UI state to remove game-specific overrides
+        self._update_zone_ui_state()
 
     @QtCore.Slot()
     def _on_save_camera(self) -> None:
