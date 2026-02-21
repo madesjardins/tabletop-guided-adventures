@@ -218,6 +218,10 @@ tests/images/*
 vosk_models/*
 !vosk_models/_add_vosk_models_here.txt
 
+# Images - ignore everything except _add_images_folders_here.txt
+images/*
+!images/_add_images_folders_here.txt
+
 # Temp stuff
 temp/
 tmp/
