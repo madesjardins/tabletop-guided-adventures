@@ -46,7 +46,7 @@ Place the downloaded `.onnx` and `.onnx.json` files in the `piper_voices/` direc
 Download test images (camera calibration, QR detection, etc.) from:
 https://drive.google.com/drive/folders/1hNMYz9KV5h4m3BCLkFu0OBJlWMcWAwb7?usp=drive_link
 
-See `tabletop-guided-adventures/tests/images/_add_test_images_here.txt` for detailed information about available test images.
+See `tests/images/_add_test_images_here.txt` for detailed information about available test images.
 
 Place all files from the Google Drive folder into the `tests/images/` directory. These images are required for running various integration tests.
 
@@ -55,7 +55,7 @@ Place all files from the Google Drive folder into the `tests/images/` directory.
 Download MicroQR folder (images to print) from:
 https://drive.google.com/drive/folders/1XY2nEVhngzmPuN3-VRPTqTm4tHSvWqTZ?usp=drive_link
 
-Place in 'tabletop-guided-adventures/images'.
+Place the downloaded MicroQR folder in 'images' directory.
 
 ### Vosk Speech Recognition Models
 
