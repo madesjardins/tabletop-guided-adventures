@@ -4265,6 +4265,7 @@ class MainWindow(QtWidgets.QMainWindow):
             width, height = map(int, resolution.split('x'))
             camera.set_property(cv.CAP_PROP_FRAME_WIDTH, float(width))
             camera.set_property(cv.CAP_PROP_FRAME_HEIGHT, float(height))
+            self._clear_calibration_frames()
 
     @QtCore.Slot(int)
     def _on_exposure_changed(self, value: int) -> None:
@@ -4623,9 +4624,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Remove calibration data (undistort_rectification is inside it)
         camera.calibration_data = None
-
-        # Clear calibration frames
-        self._clear_calibration_frames()
 
         # Update UI - re-enable focus/zoom since camera is no longer calibrated
         self._set_camera_settings_enabled(True, is_calibrated=False)
