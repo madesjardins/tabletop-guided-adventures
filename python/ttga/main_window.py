@@ -172,7 +172,7 @@ class MainWindow(QtWidgets.QMainWindow):
         Returns:
             Group box containing camera, projector, and zone tabs.
         """
-        group = QtWidgets.QGroupBox("Cameras, Projectors & Zones")
+        group = QtWidgets.QGroupBox("")
         group.setFixedWidth(350)
         layout = QtWidgets.QVBoxLayout(group)
 
