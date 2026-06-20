@@ -142,14 +142,16 @@ class GameLoader:
             if item.name.startswith('__') or item.name.startswith('.'):
                 continue
 
-            # Look for game.py in the subdirectory
+            # Look for game.py directly (test_games style), or in python/ subdir (games/ style)
             game_file = item / "game.py"
             if not game_file.exists():
-                continue
+                game_file = item / "python" / "game.py"
+                if not game_file.exists():
+                    continue
 
             # Try to load metadata without fully loading the game
             try:
-                metadata = self._load_game_metadata(str(game_file))
+                metadata = self._load_game_metadata(str(game_file), game_folder=item)
                 if metadata:
                     games.append(GameInfo(
                         name=metadata.get('name', item.name),
@@ -166,11 +168,14 @@ class GameLoader:
 
         return games
 
-    def _load_game_metadata(self, module_path: str | Path) -> Optional[dict]:
+    def _load_game_metadata(self, module_path: str | Path, game_folder: Path | None = None) -> Optional[dict]:
         """Load game metadata without instantiating the game.
 
         Args:
             module_path: Path to the game.py file (string or Path object).
+            game_folder: Root folder of the game where game.yaml lives. Defaults to
+                module_path.parent (test_games style). For games/ style where game.py
+                is inside a python/ subdirectory, pass the parent game folder explicitly.
 
         Returns:
             Metadata dictionary or None if loading failed.
@@ -178,7 +183,8 @@ class GameLoader:
         try:
             # Load metadata from game.yaml file
             module_path = Path(module_path) if isinstance(module_path, str) else module_path
-            game_folder = module_path.parent
+            if game_folder is None:
+                game_folder = module_path.parent
             yaml_path = game_folder / "game.yaml"
 
             if not yaml_path.exists():
@@ -226,9 +232,13 @@ class GameLoader:
 
             # First, register the package in sys.modules to support relative imports
             # Create a minimal package module
+            # Use the directory containing game.py as the package path so that
+            # relative imports (e.g. from .event_manager) resolve correctly whether
+            # game.py lives directly in the game folder or in a python/ subfolder.
             import types
+            module_dir = Path(game_info.module_path).parent
             package_module = types.ModuleType(package_name)
-            package_module.__path__ = [str(game_folder)]
+            package_module.__path__ = [str(module_dir)]
             package_module.__package__ = package_name
             sys.modules[package_name] = package_module
 
@@ -272,7 +282,9 @@ class GameLoader:
     def unload_game(self, game_info: GameInfo) -> None:
         """Clean up after unloading a game.
 
-        Removes the game's folder from sys.path.
+        Removes the game's folder from sys.path and purges all of the game's
+        cached modules from sys.modules so that a subsequent reload always
+        imports fresh code rather than the cached pre-edit versions.
 
         Args:
             game_info: GameInfo object for the game being unloaded.
@@ -280,3 +292,11 @@ class GameLoader:
         game_folder = str(Path(game_info.folder_path))
         if game_folder in sys.path:
             sys.path.remove(game_folder)
+
+        package_name = f"game_{Path(game_info.folder_path).name}"
+        stale = [
+            key for key in sys.modules
+            if key == package_name or key.startswith(f"{package_name}.")
+        ]
+        for key in stale:
+            del sys.modules[key]

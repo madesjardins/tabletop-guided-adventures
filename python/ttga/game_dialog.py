@@ -127,24 +127,24 @@ class GameDialog(QtWidgets.QDialog):
 
         layout = QtWidgets.QVBoxLayout(self)
 
-        # Tab widget
-        tabs = QtWidgets.QTabWidget()
+        # Tab widget - stored as instance variable so subclasses can add extra tabs
+        self.tabs = QtWidgets.QTabWidget()
 
         # Main tab (can be overridden by subclass)
         main_tab = self._create_main_tab()
         if main_tab:
-            tabs.addTab(main_tab, "Main")
+            self.tabs.addTab(main_tab, "Main")
 
         # Zones tab
         zones_tab = self._create_zones_tab()
-        tabs.addTab(zones_tab, "Zones")
+        self.tabs.addTab(zones_tab, "Zones")
 
         # Settings tab (can be overridden by subclass)
         settings_tab = self._create_settings_tab()
         if settings_tab:
-            tabs.addTab(settings_tab, "Settings")
+            self.tabs.addTab(settings_tab, "Settings")
 
-        layout.addWidget(tabs)
+        layout.addWidget(self.tabs)
 
     def _create_zones_tab(self) -> QtWidgets.QWidget:
         """Create the zones configuration tab.
