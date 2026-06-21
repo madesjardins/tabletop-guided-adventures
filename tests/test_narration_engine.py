@@ -31,7 +31,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python"))
 sys.path.insert(0, str(ROOT / "games" / "ttga-warmachine" / "python"))
 
-from narration_engine import NarrationEngine, DEFAULT_PERSONA  # noqa: E402
+from ttga.narration_engine import NarrationEngine, DEFAULT_PERSONA  # noqa: E402
+from persona import WARMACHINE_PERSONA  # noqa: E402
 
 
 class FakeClient:
@@ -110,6 +111,13 @@ def run() -> int:
     sit_engine = NarrationEngine(llm_client=sit_client)
     sit_engine.phrase(SCRIPTED, situation="ask for next model")
     ok &= _check("situation used in prompt", "ask for next model" in sit_client.last_prompt)
+
+    # Game-supplied persona is used as the system prompt (core engine is generic).
+    persona_client = FakeClient(reply="By blade and steam!")
+    persona_engine = NarrationEngine(llm_client=persona_client, persona=WARMACHINE_PERSONA)
+    persona_engine.phrase(SCRIPTED)
+    ok &= _check("game persona used as system", persona_client.last_system == WARMACHINE_PERSONA)
+    ok &= _check("game persona differs from default", WARMACHINE_PERSONA != DEFAULT_PERSONA)
 
     print("=" * 60)
     if ok:
