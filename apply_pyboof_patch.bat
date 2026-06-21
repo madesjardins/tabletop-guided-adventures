@@ -9,11 +9,11 @@ echo.
 
 REM Get PyBoof installation path using Python
 echo Detecting PyBoof installation location...
-python -c "import pyboof; import os; print(os.path.dirname(pyboof.__file__))" > pyboof_path.tmp 2>nul
+uv run python -c "import pyboof; import os; print(os.path.dirname(pyboof.__file__))" > pyboof_path.tmp 2>nul
 
 if errorlevel 1 (
     echo ERROR: Could not find PyBoof installation.
-    echo Please ensure PyBoof is installed: pip install pyboof
+    echo Please ensure PyBoof is installed: uv sync
     del pyboof_path.tmp 2>nul
     pause
     exit /b 1

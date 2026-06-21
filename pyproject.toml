@@ -1,0 +1,20 @@
+[project]
+name = "tabletop-guided-adventures"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "opencv-python",
+    "cv2-enumerate-cameras",
+    "pyside6",
+    "numpy",
+    "vosk",
+    "pyboof",
+    "piper-tts",
+    "pygame",
+    "sounddevice",
+    "python-levenshtein",
+    "pyyaml",
+]
+
+[tool.uv]
+package = false
