@@ -20,6 +20,8 @@ core functionality and state.
 
 from __future__ import annotations
 
+import os
+import threading
 from typing import Optional
 
 from PySide6 import QtCore
@@ -30,6 +32,7 @@ from .projector_manager import ProjectorManager
 from .zone_manager import ZoneManager
 from .speech_recognition import SpeechRecognizer
 from .narrator import Narrator
+from .llm_client import LLMClient, LLMConfig
 from .game_loader import GameLoader, GameInfo
 from .game_base import GameBase
 
@@ -68,6 +71,9 @@ class MainCore(QtCore.QObject):
     speech_final_result = QtCore.Signal(str)
     game_loaded = QtCore.Signal(str)  # game name
     game_unloaded = QtCore.Signal()
+    # Emitted after an asynchronous LLM model load attempt: (success, message).
+    # On success, message is the loaded model name (empty when unloaded).
+    llm_model_loaded = QtCore.Signal(bool, str)
 
     def __init__(self) -> None:
         """Initialize the main core."""
@@ -85,6 +91,13 @@ class MainCore(QtCore.QObject):
 
         # Narrator (TTS and audio)
         self.narrator = Narrator()
+
+        # Local LLM narrator brains (optional). Shared by all games. No model
+        # is loaded initially, so is_available() is False and games fall back
+        # to scripted text until the user selects a model.
+        self.llm_client = LLMClient(LLMConfig(enabled=True))
+        self.llm_model_path: Optional[str] = None
+        self.llm_n_gpu_layers: int = -1
 
         # Refresh rates
         self.viewports_refresh_rate: int = 30
@@ -143,6 +156,38 @@ class MainCore(QtCore.QObject):
         # Pass to current game if loaded
         if self.current_game:
             self.current_game.on_speech_command(text)
+
+    def set_llm_model(
+        self, model_path: Optional[str], n_gpu_layers: int = -1
+    ) -> None:
+        """Load (or unload) the LLM model on a background thread.
+
+        Loading a multi-gigabyte GGUF model is slow, so it runs off the Qt
+        thread to keep the UI responsive. The outcome is reported via the
+        :attr:`llm_model_loaded` signal.
+
+        Args:
+            model_path: Path to a ``.gguf`` model, or a falsy value to unload
+                (disabling the LLM so games use scripted text).
+            n_gpu_layers: GPU layers to offload (-1 = all, 0 = CPU only).
+        """
+        self.llm_n_gpu_layers = n_gpu_layers
+        self.llm_client.config.n_gpu_layers = n_gpu_layers
+
+        def _load() -> None:
+            try:
+                if not model_path:
+                    self.llm_client.unload()
+                    self.llm_model_path = None
+                    self.llm_model_loaded.emit(True, "")
+                    return
+                self.llm_client.load_model(model_path)
+                self.llm_model_path = model_path
+                self.llm_model_loaded.emit(True, os.path.basename(model_path))
+            except Exception as e:
+                self.llm_model_loaded.emit(False, str(e))
+
+        threading.Thread(target=_load, daemon=True).start()
 
     @QtCore.Slot(int)
     def set_qr_code_refresh_rate(self, fps: int) -> None:
@@ -259,6 +304,7 @@ class MainCore(QtCore.QObject):
         if self.speech_recognizer is not None:
             self.speech_recognizer.stop()
             self.speech_recognizer = None
+        self.llm_client.unload()
         self.narrator.shutdown()
         self.camera_manager.release_all()
         self.projector_manager.clear_all()
