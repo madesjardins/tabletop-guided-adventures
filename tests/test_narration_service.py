@@ -98,7 +98,7 @@ def test_speak_logic() -> bool:
     svc.sentence_spoken.connect(sentences.append)
     svc.narrated.connect(narrated.append)
 
-    svc._do_speak("scripted fallback", None)
+    svc._do_speak("scripted fallback", None, use_persona=True)
 
     ok &= _check("each sentence emitted", sentences == ["The siege begins.", "Steel meets steel!"])
     ok &= _check("each sentence synthesized", narrator.spoken == sentences)
@@ -144,7 +144,7 @@ def test_threaded_end_to_end() -> bool:
     svc.narrated.connect(narrated.append)
     svc.intent_parsed.connect(lambda rid, intent: intents.append((rid, intent)))
 
-    svc.speak("scripted")
+    svc.speak("scripted", use_persona=True)
     req_id = svc.parse_intent_async("add the juggernaut", {"add_model": "add"})
 
     got = _pump_until(lambda: narrated and intents)

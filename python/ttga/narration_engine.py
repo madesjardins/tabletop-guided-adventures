@@ -135,6 +135,40 @@ class NarrationEngine:
         self._max_tokens = max_tokens
 
     @property
+    def persona(self) -> str:
+        """The current persona system-prompt."""
+        return self._persona
+
+    def set_persona(self, persona: str) -> None:
+        """Update the persona system-prompt at runtime.
+
+        Takes effect on the next ``phrase()`` / ``phrase_stream()`` call —
+        no need to recreate the engine.
+
+        Args:
+            persona: The new persona system-prompt text.
+        """
+        self._persona = persona
+
+    @property
+    def temperature(self) -> float:
+        """Sampling temperature for phrasing generation."""
+        return self._temperature
+
+    def set_temperature(self, temperature: float) -> None:
+        """Set the sampling temperature at runtime."""
+        self._temperature = temperature
+
+    @property
+    def max_tokens(self) -> int:
+        """Maximum tokens to generate per phrase."""
+        return self._max_tokens
+
+    def set_max_tokens(self, max_tokens: int) -> None:
+        """Set the max generation length at runtime."""
+        self._max_tokens = max_tokens
+
+    @property
     def enabled(self) -> bool:
         """Whether in-character phrasing is enabled."""
         return self._enabled

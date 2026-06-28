@@ -40,7 +40,7 @@ from typing import Any, Mapping, Optional
 
 from PySide6 import QtCore
 
-from .narration_engine import Intent, NarrationEngine
+from .narration_engine import Intent, NarrationEngine, split_sentences
 from .sound_mixer import Channel
 
 
@@ -91,18 +91,27 @@ class NarrationService(QtCore.QObject):
     # Public API
     # ------------------------------------------------------------------
 
-    def speak(self, scripted: str, *, situation: Optional[str] = None) -> None:
-        """Phrase and speak *scripted* in-character, off the main thread.
+    def speak(
+        self,
+        scripted: str,
+        *,
+        situation: Optional[str] = None,
+        use_persona: bool = False,
+    ) -> None:
+        """Phrase and speak *scripted*, off the main thread.
 
-        Streams the phrasing one sentence at a time, synthesizing each sentence
-        as it arrives. Fire-and-forget: progress arrives via :attr:`sentence_spoken`
-        and :attr:`narrated`.
+        When *use_persona* is True, the scripted line is rephrased in-character
+        by the LLM (streamed sentence by sentence). When False (default), the
+        text is spoken verbatim — suitable for functional messages, error
+        notices, and confirmations where dramatization is undesirable.
 
         Args:
-            scripted: The deterministic fallback line / source of facts.
-            situation: Optional explicit SITUATION block.
+            scripted: The text to speak (or source of facts for LLM phrasing).
+            situation: Optional explicit SITUATION block for LLM phrasing.
+            use_persona: When True, rephrase via the LLM persona. When False,
+                speak the text as-is.
         """
-        self._executor.submit(self._do_speak, scripted, situation)
+        self._executor.submit(self._do_speak, scripted, situation, use_persona)
 
     def parse_intent_async(
         self,
@@ -138,10 +147,19 @@ class NarrationService(QtCore.QObject):
     # Worker-thread implementations
     # ------------------------------------------------------------------
 
-    def _do_speak(self, scripted: str, situation: Optional[str]) -> None:
+    def _do_speak(
+        self,
+        scripted: str,
+        situation: Optional[str],
+        use_persona: bool = False,
+    ) -> None:
         parts: list[str] = []
         try:
-            for sentence in self._engine.phrase_stream(scripted, situation=situation):
+            if use_persona:
+                iterator = self._engine.phrase_stream(scripted, situation=situation)
+            else:
+                iterator = split_sentences(scripted)[0] or [scripted]
+            for sentence in iterator:
                 if not sentence:
                     continue
                 parts.append(sentence)

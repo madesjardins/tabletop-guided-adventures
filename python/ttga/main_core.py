@@ -35,6 +35,7 @@ from .narrator import Narrator
 from .llm_client import LLMClient, LLMConfig
 from .game_loader import GameLoader, GameInfo
 from .game_base import GameBase
+from .help_agent import HelpAgent
 
 
 class MainCore(QtCore.QObject):
@@ -74,6 +75,10 @@ class MainCore(QtCore.QObject):
     # Emitted after an asynchronous LLM model load attempt: (success, message).
     # On success, message is the loaded model name (empty when unloaded).
     llm_model_loaded = QtCore.Signal(bool, str)
+    # Emitted when the user changes the narrator persona text.
+    persona_changed = QtCore.Signal(str)
+    # Emitted when the user changes temperature or max_tokens.
+    narration_params_changed = QtCore.Signal(float, int)
 
     def __init__(self) -> None:
         """Initialize the main core."""
@@ -98,6 +103,15 @@ class MainCore(QtCore.QObject):
         self.llm_client = LLMClient(LLMConfig(enabled=True))
         self.llm_model_path: Optional[str] = None
         self.llm_n_gpu_layers: int = -1
+
+        # Help / Q&A agent (core-level, voice-triggered, read-only).
+        self.help_agent = HelpAgent(self.llm_client, self.narrator)
+
+        # Narrator persona (user-editable, overrides game defaults when non-empty).
+        self._persona: str = ""
+        # LLM generation parameters (user-editable, override engine defaults).
+        self._temperature: float = 0.7
+        self._max_tokens: int = 120
 
         # Refresh rates
         self.viewports_refresh_rate: int = 30
@@ -147,11 +161,18 @@ class MainCore(QtCore.QObject):
     def _on_speech_final_result(self, text: str) -> None:
         """Handle final speech recognition result.
 
+        The help agent is checked *before* normal game routing so that the
+        wake phrase ("Help me...") works in both the main menu and in-game.
+
         Args:
             text: Recognized text.
         """
         # Emit signal for UI and other listeners
         self.speech_final_result.emit(text)
+
+        # Help agent pre-filter (consumes wake-phrase utterances).
+        if self.help_agent.handle_utterance(text, self.current_game):
+            return
 
         # Pass to current game if loaded
         if self.current_game:
@@ -188,6 +209,49 @@ class MainCore(QtCore.QObject):
                 self.llm_model_loaded.emit(False, str(e))
 
         threading.Thread(target=_load, daemon=True).start()
+
+    @property
+    def persona(self) -> str:
+        """The user-configured narrator persona (empty = use game default)."""
+        return self._persona
+
+    def set_persona(self, persona: str) -> None:
+        """Set the narrator persona and propagate to any active game.
+
+        Args:
+            persona: The new persona text. Empty string means "use the
+                game's built-in default persona".
+        """
+        self._persona = persona
+        self.persona_changed.emit(persona)
+
+    @property
+    def temperature(self) -> float:
+        """The user-configured LLM sampling temperature."""
+        return self._temperature
+
+    def set_temperature(self, temperature: float) -> None:
+        """Set the LLM sampling temperature and propagate to active games.
+
+        Args:
+            temperature: Sampling temperature (0.0–2.0).
+        """
+        self._temperature = temperature
+        self.narration_params_changed.emit(temperature, self._max_tokens)
+
+    @property
+    def max_tokens(self) -> int:
+        """The user-configured max generation length."""
+        return self._max_tokens
+
+    def set_max_tokens(self, max_tokens: int) -> None:
+        """Set the max generation length and propagate to active games.
+
+        Args:
+            max_tokens: Maximum tokens to generate per phrase.
+        """
+        self._max_tokens = max_tokens
+        self.narration_params_changed.emit(self._temperature, max_tokens)
 
     @QtCore.Slot(int)
     def set_qr_code_refresh_rate(self, fps: int) -> None:
@@ -304,6 +368,7 @@ class MainCore(QtCore.QObject):
         if self.speech_recognizer is not None:
             self.speech_recognizer.stop()
             self.speech_recognizer = None
+        self.help_agent.shutdown()
         self.llm_client.unload()
         self.narrator.shutdown()
         self.camera_manager.release_all()
