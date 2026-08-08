@@ -303,6 +303,14 @@ class MainWindow(QtWidgets.QMainWindow):
         narrator_widget = self._create_narrator_widget()
         tabs.addTab(narrator_widget, "Narrator")
 
+        # LLM Narrator tab
+        llm_widget = self._create_llm_widget()
+        tabs.addTab(llm_widget, "LLM Narrator")
+
+        # Narrator Persona tab
+        persona_widget = self._create_persona_widget()
+        tabs.addTab(persona_widget, "Narrator Persona")
+
         # Advanced tab
         advanced_widget = QtWidgets.QWidget()
         advanced_layout = QtWidgets.QVBoxLayout(advanced_widget)
@@ -748,6 +756,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.narrator_output_device_combo = QtWidgets.QComboBox()
         voice_config_layout.addRow("Output Device:", self.narrator_output_device_combo)
 
+        # Test speak row
+        speak_row = QtWidgets.QHBoxLayout()
+        self.narrator_test_speak_edit = QtWidgets.QLineEdit()
+        self.narrator_test_speak_edit.setPlaceholderText("Type text to speak…")
+        speak_row.addWidget(self.narrator_test_speak_edit)
+        self.narrator_test_speak_button = QtWidgets.QPushButton("Speak")
+        self.narrator_test_speak_button.setMaximumWidth(80)
+        speak_row.addWidget(self.narrator_test_speak_button)
+        self.narrator_test_speak_persona_button = QtWidgets.QPushButton("Speak with Persona")
+        self.narrator_test_speak_persona_button.setEnabled(False)
+        speak_row.addWidget(self.narrator_test_speak_persona_button)
+        voice_config_layout.addRow("Test:", speak_row)
+
         main_layout.addWidget(voice_config_group)
 
         # Channel Volume Controls Group
@@ -818,6 +839,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.narrator_effect_test_button.clicked.connect(self._on_narrator_effect_test)
         self.narrator_music_test_button.clicked.connect(self._on_narrator_music_test)
 
+        self.narrator_test_speak_button.clicked.connect(self._on_test_speak)
+        self.narrator_test_speak_persona_button.clicked.connect(self._on_test_speak_persona)
+        self.core.llm_model_loaded.connect(self._on_llm_model_loaded_for_speak)
+
         # Initialize narrator with default voice if available
         if self.narrator_voice_combo.count() > 0:
             voice_path = self.narrator_voice_combo.itemData(0)
@@ -833,6 +858,255 @@ class MainWindow(QtWidgets.QMainWindow):
         self.narrator_music_test_index = 0
 
         return widget
+
+    def _create_llm_widget(self) -> QtWidgets.QWidget:
+        """Create the LLM narrator widget for selecting the local LLM model.
+
+        Returns:
+            Widget containing LLM model-selection controls.
+        """
+        widget = QtWidgets.QWidget()
+        main_layout = QtWidgets.QVBoxLayout(widget)
+
+        info = QtWidgets.QLabel(
+            "Select a local LLM to power in-character narration and voice "
+            "command understanding. When no model is loaded, the game uses "
+            "scripted text."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #888;")
+        main_layout.addWidget(info)
+
+        config_group = QtWidgets.QGroupBox("Model Configuration")
+        config_layout = QtWidgets.QFormLayout(config_group)
+
+        # Model combo box (populated from the client's discovery).
+        self.llm_model_combo = QtWidgets.QComboBox()
+        config_layout.addRow("Model:", self.llm_model_combo)
+
+        # GPU layers: -1 = all on GPU, 0 = CPU only.
+        self.llm_gpu_layers_spinbox = QtWidgets.QSpinBox()
+        self.llm_gpu_layers_spinbox.setRange(-1, 200)
+        self.llm_gpu_layers_spinbox.setValue(self.core.llm_n_gpu_layers)
+        self.llm_gpu_layers_spinbox.setSpecialValueText("All (GPU)")
+        self.llm_gpu_layers_spinbox.setToolTip(
+            "-1 = offload all layers to GPU, 0 = CPU only."
+        )
+        config_layout.addRow("GPU Layers:", self.llm_gpu_layers_spinbox)
+
+        # Action buttons.
+        button_row = QtWidgets.QHBoxLayout()
+        self.llm_refresh_button = QtWidgets.QPushButton("Refresh")
+        self.llm_load_button = QtWidgets.QPushButton("Load Model")
+        button_row.addWidget(self.llm_refresh_button)
+        button_row.addWidget(self.llm_load_button)
+        button_row.addStretch()
+        config_layout.addRow(button_row)
+
+        # Status label.
+        self.llm_status_label = QtWidgets.QLabel()
+        self.llm_status_label.setWordWrap(True)
+        config_layout.addRow("Status:", self.llm_status_label)
+
+        main_layout.addWidget(config_group)
+        main_layout.addStretch()
+
+        # Populate and wire up.
+        self._populate_llm_models()
+        self.llm_refresh_button.clicked.connect(self._populate_llm_models)
+        self.llm_load_button.clicked.connect(self._on_llm_load)
+        self.core.llm_model_loaded.connect(self._on_llm_model_loaded)
+
+        return widget
+
+    def _create_persona_widget(self) -> QtWidgets.QWidget:
+        """Create the Narrator Persona tab for editing persona and generation params.
+
+        Returns:
+            Widget containing the persona text editor and LLM parameter controls.
+        """
+        from .narration_engine import DEFAULT_PERSONA
+
+        widget = QtWidgets.QWidget()
+        main_layout = QtWidgets.QVBoxLayout(widget)
+
+        info = QtWidgets.QLabel(
+            "The system prompt defines the narrator's character. When non-empty, "
+            "it overrides the game's default persona. Apply takes effect "
+            "immediately, even mid-game."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #888;")
+        main_layout.addWidget(info)
+
+        # Persona text editor.
+        self.llm_persona_edit = QtWidgets.QPlainTextEdit()
+        # Show the default persona as placeholder when the override is empty.
+        self.llm_persona_edit.setPlainText(self.core.persona or DEFAULT_PERSONA)
+        self.llm_persona_edit.setFixedHeight(100)
+        self.llm_persona_edit.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        main_layout.addWidget(self.llm_persona_edit)
+
+        # Generation parameters.
+        params_group = QtWidgets.QGroupBox("Generation Parameters")
+        params_layout = QtWidgets.QFormLayout(params_group)
+
+        self.llm_temperature_spinbox = QtWidgets.QDoubleSpinBox()
+        self.llm_temperature_spinbox.setRange(0.0, 2.0)
+        self.llm_temperature_spinbox.setSingleStep(0.1)
+        self.llm_temperature_spinbox.setValue(self.core.temperature)
+        self.llm_temperature_spinbox.setToolTip(
+            "Controls randomness: 0.0 = deterministic, 1.0 = balanced, "
+            "2.0 = very creative."
+        )
+        params_layout.addRow("Temperature:", self.llm_temperature_spinbox)
+
+        self.llm_max_tokens_spinbox = QtWidgets.QSpinBox()
+        self.llm_max_tokens_spinbox.setRange(16, 1024)
+        self.llm_max_tokens_spinbox.setSingleStep(16)
+        self.llm_max_tokens_spinbox.setValue(self.core.max_tokens)
+        self.llm_max_tokens_spinbox.setToolTip(
+            "Maximum tokens generated per narration. Higher = longer responses."
+        )
+        params_layout.addRow("Max Tokens:", self.llm_max_tokens_spinbox)
+
+        main_layout.addWidget(params_group)
+
+        # Buttons.
+        button_row = QtWidgets.QHBoxLayout()
+        self.llm_persona_apply_button = QtWidgets.QPushButton("Apply")
+        self.llm_persona_reset_button = QtWidgets.QPushButton("Reset to Default")
+        button_row.addWidget(self.llm_persona_apply_button)
+        button_row.addWidget(self.llm_persona_reset_button)
+        button_row.addStretch()
+        main_layout.addLayout(button_row)
+
+        main_layout.addStretch()
+
+        # Wire up.
+        self.llm_persona_apply_button.clicked.connect(self._on_apply_persona)
+        self.llm_persona_reset_button.clicked.connect(self._on_reset_persona)
+
+        return widget
+
+    def _populate_llm_models(self) -> None:
+        """Populate the LLM model combo from the client, with VRAM hints.
+
+        Always includes a "None" entry (scripted only). Reflects the empty /
+        unavailable states described in the architecture doc.
+        """
+        self.llm_model_combo.blockSignals(True)
+        self.llm_model_combo.clear()
+        # "None" disables the LLM and falls back to scripted narration.
+        self.llm_model_combo.addItem("None — scripted only", "")
+
+        runtime_ok = self.core.llm_client.runtime_available()
+        models = self.core.llm_client.list_models() if runtime_ok else []
+        for model in models:
+            label = f"{model.name}  ({model.vram_hint})"
+            self.llm_model_combo.addItem(label, model.path)
+
+        # Reflect the currently loaded model in the selection.
+        if self.core.llm_model_path:
+            idx = self.llm_model_combo.findData(self.core.llm_model_path)
+            if idx >= 0:
+                self.llm_model_combo.setCurrentIndex(idx)
+        self.llm_model_combo.blockSignals(False)
+
+        if not runtime_ok:
+            self._set_llm_status(
+                "llama-cpp-python is not installed; LLM narration unavailable.",
+                "color: #cc6600;",
+            )
+            self.llm_load_button.setEnabled(False)
+        elif not models:
+            self._set_llm_status(
+                "No models found. Add a .gguf file to the models/ folder.",
+                "color: #cc6600;",
+            )
+            self.llm_load_button.setEnabled(True)
+        elif self.core.llm_model_path:
+            import os
+            self._set_llm_status(
+                f"Loaded: {os.path.basename(self.core.llm_model_path)}",
+                "color: #008800;",
+            )
+            self.llm_load_button.setEnabled(True)
+        else:
+            self._set_llm_status("No model loaded (scripted narration).", "color: #888;")
+            self.llm_load_button.setEnabled(True)
+
+    def _set_llm_status(self, text: str, style: str = "color: #888;") -> None:
+        """Update the LLM status label text and style."""
+        self.llm_status_label.setText(text)
+        self.llm_status_label.setStyleSheet(style)
+
+    @QtCore.Slot()
+    def _on_llm_load(self) -> None:
+        """Load (or unload) the selected LLM model via the core."""
+        model_path = self.llm_model_combo.currentData()
+        n_gpu_layers = self.llm_gpu_layers_spinbox.value()
+        if not model_path:
+            self._set_llm_status("Disabling LLM (scripted narration)…", "color: #888;")
+        else:
+            import os
+            self._set_llm_status(
+                f"Loading {os.path.basename(model_path)}…", "color: #cc6600;"
+            )
+        self.llm_load_button.setEnabled(False)
+        self.core.set_llm_model(model_path, n_gpu_layers)
+
+    @QtCore.Slot(bool, str)
+    def _on_llm_model_loaded(self, success: bool, message: str) -> None:
+        """Reflect the outcome of an async LLM model load."""
+        self.llm_load_button.setEnabled(True)
+        if not success:
+            self._set_llm_status(f"Load failed: {message}", "color: #cc0000;")
+            return
+        if message:
+            self._set_llm_status(f"Loaded: {message}", "color: #008800;")
+        else:
+            self._set_llm_status("No model loaded (scripted narration).", "color: #888;")
+
+    @QtCore.Slot()
+    def _on_apply_persona(self) -> None:
+        """Apply the edited persona text and generation params to the core."""
+        text = self.llm_persona_edit.toPlainText().strip()
+        self.core.set_persona(text)
+        self.core.set_temperature(self.llm_temperature_spinbox.value())
+        self.core.set_max_tokens(self.llm_max_tokens_spinbox.value())
+
+    @QtCore.Slot()
+    def _on_reset_persona(self) -> None:
+        """Clear the persona override and reset params to defaults."""
+        from .narration_engine import DEFAULT_PERSONA
+        self.llm_persona_edit.setPlainText(DEFAULT_PERSONA)
+        self.core.set_persona("")
+        self.llm_temperature_spinbox.setValue(0.7)
+        self.core.set_temperature(0.7)
+        self.llm_max_tokens_spinbox.setValue(120)
+        self.core.set_max_tokens(120)
+
+    def _find_matching_llm_model(self, saved_model_path: str) -> int:
+        """Find a saved LLM model in the combo box (exact, then by name).
+
+        Args:
+            saved_model_path: The saved model path to match.
+
+        Returns:
+            Combo index of the match, or 0 (the "None" entry) if not found.
+        """
+        import os
+
+        for i in range(self.llm_model_combo.count()):
+            if self.llm_model_combo.itemData(i) == saved_model_path:
+                return i
+        saved_name = os.path.basename(saved_model_path)
+        for i in range(self.llm_model_combo.count()):
+            data = self.llm_model_combo.itemData(i)
+            if data and os.path.basename(data) == saved_name:
+                return i
+        return 0
 
     def _populate_narrator_voices(self) -> None:
         """Populate the narrator voice combo box with available Piper models."""
@@ -1710,6 +1984,60 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Music Test Error",
                 f"Failed to play music test: {e}"
             )
+
+    @QtCore.Slot()
+    def _on_test_speak(self) -> None:
+        """Speak the text in the test field verbatim via TTS."""
+        from .sound_mixer import Channel
+
+        text = self.narrator_test_speak_edit.text().strip()
+        if not text:
+            return
+        try:
+            self.core.narrator.synthesize_and_play(
+                text,
+                channel=Channel.VOICE,
+                do_play_immediately=True,
+                do_wait_until_played=False,
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(
+                self, "Speak Error", f"Failed to speak: {e}"
+            )
+
+    @QtCore.Slot()
+    def _on_test_speak_persona(self) -> None:
+        """Phrase the text in the test field through the LLM persona, then speak."""
+        from .sound_mixer import Channel
+        from .narration_engine import NarrationEngine, DEFAULT_PERSONA
+
+        text = self.narrator_test_speak_edit.text().strip()
+        if not text:
+            return
+        persona = self.core.persona or DEFAULT_PERSONA
+        engine = NarrationEngine(
+            llm_client=self.core.llm_client,
+            persona=persona,
+            temperature=self.core.temperature,
+            max_tokens=self.core.max_tokens,
+        )
+        try:
+            spoken = engine.phrase(text)
+            self.core.narrator.synthesize_and_play(
+                spoken,
+                channel=Channel.VOICE,
+                do_play_immediately=True,
+                do_wait_until_played=False,
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(
+                self, "Speak Error", f"Failed to speak with persona: {e}"
+            )
+
+    @QtCore.Slot(bool, str)
+    def _on_llm_model_loaded_for_speak(self, success: bool, message: str) -> None:
+        """Enable or disable the 'Speak with Persona' button based on LLM availability."""
+        self.narrator_test_speak_persona_button.setEnabled(success and bool(message))
 
     def _find_matching_vosk_model(self, saved_model_path: str) -> int:
         """Find matching vosk model in combo box.
@@ -3664,6 +3992,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 'qr_code_fps': self.core.qr_code_refresh_rate
             }
 
+            # Get LLM narrator configuration
+            llm_config = {
+                'model_path': self.core.llm_model_path,
+                'n_gpu_layers': self.core.llm_n_gpu_layers,
+                'persona': self.core.persona,
+                'temperature': self.core.temperature,
+                'max_tokens': self.core.max_tokens,
+            }
+
             # Create master configuration dictionary with standard structure
             master_config = {
                 'type': 'master',
@@ -3674,6 +4011,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     'zones': zones_data,
                     'speech_recognition': speech_config,
                     'narrator': narrator_config,
+                    'llm': llm_config,
                     'refresh_rates': refresh_rates
                 }
             }
@@ -4049,6 +4387,47 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.narrator_music_volume_slider.blockSignals(False)
                 self.narrator_music_volume_label.setText(f"{int(music_volume * 100)}%")
                 self.core.narrator.set_channel_volume(Channel.MUSIC, music_volume)
+
+            # Load LLM narrator configuration
+            llm_config = master_data.get('llm', {})
+            if llm_config:
+                n_gpu_layers = llm_config.get('n_gpu_layers', -1)
+                self.llm_gpu_layers_spinbox.blockSignals(True)
+                self.llm_gpu_layers_spinbox.setValue(n_gpu_layers)
+                self.llm_gpu_layers_spinbox.blockSignals(False)
+
+                saved_model_path = llm_config.get('model_path')
+                if saved_model_path:
+                    model_index = self._find_matching_llm_model(saved_model_path)
+                    self.llm_model_combo.blockSignals(True)
+                    self.llm_model_combo.setCurrentIndex(model_index)
+                    self.llm_model_combo.blockSignals(False)
+                    model_path = self.llm_model_combo.itemData(model_index)
+                    if model_path:
+                        # Load asynchronously so the UI stays responsive.
+                        self._set_llm_status(
+                            f"Loading {os.path.basename(model_path)}…",
+                            "color: #cc6600;",
+                        )
+                        self.llm_load_button.setEnabled(False)
+                        self.core.set_llm_model(model_path, n_gpu_layers)
+
+                # Load persona override
+                saved_persona = llm_config.get('persona', '')
+                if saved_persona:
+                    self.llm_persona_edit.setPlainText(saved_persona)
+                    self.core.set_persona(saved_persona)
+
+                # Load generation parameters
+                saved_temp = llm_config.get('temperature')
+                if saved_temp is not None:
+                    self.llm_temperature_spinbox.setValue(saved_temp)
+                    self.core.set_temperature(saved_temp)
+
+                saved_max_tokens = llm_config.get('max_tokens')
+                if saved_max_tokens is not None:
+                    self.llm_max_tokens_spinbox.setValue(saved_max_tokens)
+                    self.core.set_max_tokens(saved_max_tokens)
 
             # Load refresh rates
             refresh_rates = master_data.get('refresh_rates', {})

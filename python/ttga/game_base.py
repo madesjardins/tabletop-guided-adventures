@@ -107,6 +107,26 @@ class GameBase(ABC):
         """
         pass
 
+    def get_help_context(self) -> dict:
+        """Return a state snapshot for the help agent.
+
+        Override this method to provide context-aware help. The returned dict
+        should contain at minimum a ``"state"`` key and a ``"summary"`` key.
+        A ``"topics"`` dict mapping topic names to guidance text is recommended.
+
+        Returns:
+            Dictionary with help context, or empty dict if not overridden.
+
+        Example:
+            >>> def get_help_context(self):
+            ...     return {
+            ...         "state": "setup",
+            ...         "summary": "Choosing game mode.",
+            ...         "topics": {"game_mode": "Say 'single match'."},
+            ...     }
+        """
+        return {}
+
     def on_speech_command(self, text: str) -> None:
         """Handle speech recognition results.
 

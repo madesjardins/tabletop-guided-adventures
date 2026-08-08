@@ -18,6 +18,7 @@ import os
 
 ROOT_DIR_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TEMP_DIR_PATH = os.path.join(ROOT_DIR_PATH, "temp")
+MODELS_DIR_PATH = os.path.join(ROOT_DIR_PATH, "models")
 SAVED_ROOT_DIR_PATH = os.path.join(ROOT_DIR_PATH, "saved")
 SAVED_CAMERAS_DIR_PATH = os.path.join(SAVED_ROOT_DIR_PATH, "cameras")
 SAVED_PROJECTORS_DIR_PATH = os.path.join(SAVED_ROOT_DIR_PATH, "projectors")
