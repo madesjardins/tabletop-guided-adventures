@@ -702,7 +702,10 @@ class WhisperSpeechRecognizer(QObject):
                 words = set(text.lower().split())
                 if words and words.issubset(_FILLER_WORDS):
                     return
-                self.final_result.emit(text)
+                # Strip trailing punctuation that Whisper often appends.
+                text = text.rstrip(".!?\"'")
+                if text:
+                    self.final_result.emit(text)
         except Exception as e:
             if self._is_running:
                 self.error_occurred.emit(f"Transcription error: {e}")
