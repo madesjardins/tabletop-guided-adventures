@@ -721,7 +721,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.speech_model_combo.clear()
 
         if engine == "whisper":
-            for name in ("tiny.en", "base.en", "small.en", "medium.en"):
+            for name in ("tiny.en", "base.en", "small.en", "medium.en", "large-v3", "large-v3-turbo"):
                 self.speech_model_combo.addItem(name, name)
         else:
             import os
