@@ -14,8 +14,9 @@
 
 """Integration test for speech recognition with live preview and similarity matching.
 
-This script provides a GUI application to test the SpeechRecognizer class with
-real-time speech recognition and string similarity comparison.
+This script provides a GUI application to test the SpeechRecognizer (Vosk) and
+WhisperSpeechRecognizer (faster-whisper) classes with real-time speech
+recognition, string similarity comparison, and fuzzy name matching.
 """
 
 import os
@@ -45,8 +46,10 @@ if python_path not in sys.path:
 
 from ttga.speech_recognition import (  # noqa: E402
     SpeechRecognizer,
+    WhisperSpeechRecognizer,
     get_audio_input_devices,
-    string_similarity
+    string_similarity,
+    fuzzy_match_name,
 )
 
 
@@ -61,7 +64,13 @@ REFERENCE_STRINGS = [
 
 
 class SpeechRecognitionTestWindow(QMainWindow):
-    """Main window for testing SpeechRecognizer with similarity matching."""
+    """Main window for testing SpeechRecognizer and WhisperSpeechRecognizer."""
+
+    # Whisper model sizes offered in the UI
+    _WHISPER_MODELS = [
+        "tiny.en", "base.en", "small.en", "medium.en",
+        "large-v3", "large-v3-turbo",
+    ]
 
     def __init__(self, available_models: list[str], default_model_index: int = 0) -> None:
         """Initialize the test window.
@@ -75,9 +84,10 @@ class SpeechRecognitionTestWindow(QMainWindow):
         self.available_models: list[str] = available_models
         self.default_model_index: int = default_model_index
         self.vosk_models_path: str = os.path.join(root_dir_path, "vosk_models")
-        self.speech_recognizer: SpeechRecognizer | None = None
+        self.speech_recognizer: SpeechRecognizer | WhisperSpeechRecognizer | None = None
         self.similarity_spinboxes: list[QDoubleSpinBox] = []
         self.threshold_spinbox: QDoubleSpinBox | None = None
+        self.fuzzy_match_label: QLabel | None = None
 
         self.setWindowTitle("Speech Recognition Integration Test")
         self.setMinimumSize(800, 600)
@@ -96,22 +106,36 @@ class SpeechRecognitionTestWindow(QMainWindow):
         config_group = QGroupBox("Configuration")
         config_layout = QFormLayout()
 
-        # Vosk model selection
+        # STT engine selection
+        self.engine_combo = QComboBox()
+        self.engine_combo.addItem("Vosk", "vosk")
+        self.engine_combo.addItem("Whisper (faster-whisper)", "whisper")
+        self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
+        config_layout.addRow("STT Engine:", self.engine_combo)
+
+        # Model selection (populated based on engine)
         self.model_combo = QComboBox()
-        for model in self.available_models:
-            self.model_combo.addItem(model)
-        # Set default model before connecting signal to avoid premature initialization
-        self.model_combo.setCurrentIndex(self.default_model_index)
         self.model_combo.currentIndexChanged.connect(self._on_model_changed)
-        config_layout.addRow("Vosk Model:", self.model_combo)
+        config_layout.addRow("Model:", self.model_combo)
 
         # Audio device selection
         self.device_combo = QComboBox()
         self.device_combo.currentIndexChanged.connect(self._on_device_changed)
         config_layout.addRow("Audio Device:", self.device_combo)
 
+        # Initial prompt (Whisper only)
+        self.initial_prompt_edit = QLineEdit()
+        self.initial_prompt_edit.setPlaceholderText(
+            "Domain vocabulary, e.g. Winter Guard, Khador, Cygnar, Stormblade"
+        )
+        self.initial_prompt_edit.textChanged.connect(self._on_initial_prompt_changed)
+        config_layout.addRow("Initial Prompt (Whisper):", self.initial_prompt_edit)
+
         config_group.setLayout(config_layout)
         main_layout.addWidget(config_group)
+
+        # Populate model list for default engine (Vosk)
+        self._populate_models()
 
         # Populate device list
         self._update_device_list()
@@ -177,6 +201,15 @@ class SpeechRecognitionTestWindow(QMainWindow):
             self.similarity_spinboxes.append(spinbox)
 
         similarity_layout.addLayout(grid_layout)
+
+        # Fuzzy match result
+        fuzzy_layout = QHBoxLayout()
+        fuzzy_layout.addWidget(QLabel("<b>Fuzzy Match:</b>"))
+        self.fuzzy_match_label = QLabel("—")
+        fuzzy_layout.addWidget(self.fuzzy_match_label)
+        fuzzy_layout.addStretch()
+        similarity_layout.addLayout(fuzzy_layout)
+
         similarity_group.setLayout(similarity_layout)
         main_layout.addWidget(similarity_group)
 
@@ -224,7 +257,7 @@ class SpeechRecognitionTestWindow(QMainWindow):
         return text.lower().replace(" ", "").replace(".", "")
 
     def _update_similarity_scores(self, recognized_text: str) -> None:
-        """Update similarity scores for all reference strings.
+        """Update similarity scores and fuzzy match for all reference strings.
 
         Args:
             recognized_text: The recognized text to compare against.
@@ -247,8 +280,38 @@ class SpeechRecognitionTestWindow(QMainWindow):
                 palette.setColor(QPalette.Text, QColor(255, 0, 0))  # Red
             spinbox.setPalette(palette)
 
+        # Fuzzy match against reference strings
+        match = fuzzy_match_name(recognized_text, REFERENCE_STRINGS, threshold=threshold)
+        if match is not None:
+            self.fuzzy_match_label.setText(match)
+            self.fuzzy_match_label.setStyleSheet("color: green; font-weight: bold;")
+        else:
+            self.fuzzy_match_label.setText("—")
+            self.fuzzy_match_label.setStyleSheet("color: red;")
+
+    def _populate_models(self) -> None:
+        """Populate the model combo box based on the selected STT engine."""
+        engine = self.engine_combo.currentData() or "vosk"
+        self.model_combo.blockSignals(True)
+        self.model_combo.clear()
+
+        if engine == "whisper":
+            for name in self._WHISPER_MODELS:
+                self.model_combo.addItem(name)
+            # Default to small.en
+            idx = self.model_combo.findText("small.en")
+            if idx >= 0:
+                self.model_combo.setCurrentIndex(idx)
+        else:
+            for model in self.available_models:
+                self.model_combo.addItem(model)
+            if self.default_model_index < self.model_combo.count():
+                self.model_combo.setCurrentIndex(self.default_model_index)
+
+        self.model_combo.blockSignals(False)
+
     def _start_recognizer(self) -> None:
-        """Start speech recognizer with current model and device selection."""
+        """Start speech recognizer with current engine, model and device selection."""
         # Stop existing recognizer
         if self.speech_recognizer is not None:
             self.speech_recognizer.stop()
@@ -259,28 +322,48 @@ class SpeechRecognitionTestWindow(QMainWindow):
         if not model_name:
             return
 
-        model_path = os.path.join(self.vosk_models_path, model_name)
-
         # Get selected device index
         device_index = self.device_combo.currentData()
         if device_index is None:
             return
 
-        # Start new recognizer with selected model and device
+        engine = self.engine_combo.currentData() or "vosk"
+
+        # Start new recognizer with selected engine, model and device
         try:
-            self.speech_recognizer = SpeechRecognizer(
-                model_path=model_path,
-                device_index=device_index
-            )
+            if engine == "whisper":
+                initial_prompt = self.initial_prompt_edit.text().strip()
+                self.speech_recognizer = WhisperSpeechRecognizer(
+                    model_size=model_name,
+                    device_index=device_index,
+                    initial_prompt=initial_prompt,
+                )
+            else:
+                model_path = os.path.join(self.vosk_models_path, model_name)
+                self.speech_recognizer = SpeechRecognizer(
+                    model_path=model_path,
+                    device_index=device_index,
+                )
+
             self.speech_recognizer.partial_result.connect(self._on_partial_result)
             self.speech_recognizer.final_result.connect(self._on_final_result)
             self.speech_recognizer.error_occurred.connect(self._on_error_occurred)
 
             self.speech_recognizer.start()
-            print(f"Started speech recognition with model '{model_name}' on device {device_index}")
+            print(f"Started {engine} speech recognition with model '{model_name}' on device {device_index}")
         except Exception as e:
             print(f"Error starting speech recognizer: {e}")
             self.final_result_edit.setText(f"ERROR: {e}")
+
+    @Slot(int)
+    def _on_engine_changed(self, index: int) -> None:
+        """Handle STT engine selection change.
+
+        Args:
+            index: New combo box index.
+        """
+        self._populate_models()
+        self._start_recognizer()
 
     @Slot(int)
     def _on_model_changed(self, index: int) -> None:
@@ -290,6 +373,19 @@ class SpeechRecognitionTestWindow(QMainWindow):
             index: New combo box index.
         """
         self._start_recognizer()
+
+    @Slot(str)
+    def _on_initial_prompt_changed(self, text: str) -> None:
+        """Handle initial prompt change (Whisper only).
+
+        Updates the running Whisper recognizer's initial_prompt if possible,
+        otherwise restarts the recognizer.
+
+        Args:
+            text: New initial prompt text.
+        """
+        if self.speech_recognizer is not None and isinstance(self.speech_recognizer, WhisperSpeechRecognizer):
+            self.speech_recognizer._initial_prompt = text.strip()
 
     @Slot(int)
     def _on_device_changed(self, index: int) -> None:
@@ -358,63 +454,52 @@ def main() -> None:
     # Check for Vosk models directory
     vosk_models_path = os.path.join(root_dir_path, "vosk_models")
 
-    if not os.path.exists(vosk_models_path):
-        print(f"ERROR: Vosk models directory not found at {vosk_models_path}")
-        print("Please create the vosk_models directory and download Vosk models.")
-        print("See vosk_models/_add_vosk_models_here.txt for instructions.")
-        print("Download from: https://alphacephei.com/vosk/models")
-        return 1
-
-    # Detect available models
-    available_models = []
-    try:
-        for item in os.listdir(vosk_models_path):
-            item_path = os.path.join(vosk_models_path, item)
-            # Check if it's a directory and not the instruction file
-            if os.path.isdir(item_path) and item.startswith("vosk-model"):
-                available_models.append(item)
-    except Exception as e:
-        print(f"ERROR: Failed to list vosk_models directory: {e}")
-        return 1
+    available_models: list[str] = []
+    if os.path.exists(vosk_models_path):
+        try:
+            for item in os.listdir(vosk_models_path):
+                item_path = os.path.join(vosk_models_path, item)
+                if os.path.isdir(item_path) and item.startswith("vosk-model"):
+                    available_models.append(item)
+        except Exception as e:
+            print(f"Warning: Failed to list vosk_models directory: {e}")
 
     if not available_models:
-        print(f"ERROR: No Vosk models found in {vosk_models_path}")
-        print("Please download a Vosk model and extract it to the vosk_models directory.")
-        print("See vosk_models/_add_vosk_models_here.txt for instructions.")
-        print("Download from: https://alphacephei.com/vosk/models")
-        return 1
-
-    # Sort models to find the best default
-    # First, try to find a model with "small" in the name
-    default_model_index = 0
-    small_models = [i for i, model in enumerate(available_models) if "small" in model.lower()]
-
-    if small_models:
-        default_model_index = small_models[0]
-        print(f"Found {len(available_models)} Vosk model(s), selecting 'small' model: {available_models[default_model_index]}")
+        print("No Vosk models found — Whisper engine will still be available.")
+        print("To use Vosk, download a model from https://alphacephei.com/vosk/models")
+        print("and extract it to the vosk_models/ directory.")
     else:
-        # No "small" model found, find the smallest by directory size
-        model_sizes = []
-        for model in available_models:
-            model_path = os.path.join(vosk_models_path, model)
-            total_size = 0
-            try:
-                for dirpath, dirnames, filenames in os.walk(model_path):
-                    for filename in filenames:
-                        filepath = os.path.join(dirpath, filename)
-                        total_size += os.path.getsize(filepath)
-                model_sizes.append((model, total_size))
-            except Exception as e:
-                print(f"Warning: Could not calculate size for {model}: {e}")
-                model_sizes.append((model, float('inf')))
+        # Sort models to find the best default
+        default_model_index = 0
+        small_models = [i for i, model in enumerate(available_models) if "small" in model.lower()]
 
-        # Sort by size and get the smallest
-        model_sizes.sort(key=lambda x: x[1])
-        smallest_model = model_sizes[0][0]
-        default_model_index = available_models.index(smallest_model)
-        print(f"Found {len(available_models)} Vosk model(s), selecting smallest model: {smallest_model} ({model_sizes[0][1] / (1024 * 1024):.1f} MB)")
+        if small_models:
+            default_model_index = small_models[0]
+            print(f"Found {len(available_models)} Vosk model(s), selecting 'small' model: {available_models[default_model_index]}")
+        else:
+            # No "small" model found, find the smallest by directory size
+            model_sizes = []
+            for model in available_models:
+                model_path = os.path.join(vosk_models_path, model)
+                total_size = 0
+                try:
+                    for dirpath, dirnames, filenames in os.walk(model_path):
+                        for filename in filenames:
+                            filepath = os.path.join(dirpath, filename)
+                            total_size += os.path.getsize(filepath)
+                    model_sizes.append((model, total_size))
+                except Exception as e:
+                    print(f"Warning: Could not calculate size for {model}: {e}")
+                    model_sizes.append((model, float('inf')))
 
-    print(f"Available models: {', '.join(available_models)}")
+            model_sizes.sort(key=lambda x: x[1])
+            smallest_model = model_sizes[0][0]
+            default_model_index = available_models.index(smallest_model)
+            print(f"Found {len(available_models)} Vosk model(s), selecting smallest model: {smallest_model} ({model_sizes[0][1] / (1024 * 1024):.1f} MB)")
+
+        print(f"Available Vosk models: {', '.join(available_models)}")
+
+    default_model_index = default_model_index if available_models else 0
 
     app = QApplication(sys.argv)
 

@@ -20,16 +20,35 @@ The virtual narrator can use a local large language model through
 fully functional without it (it falls back to scripted narration), but a CUDA
 build enables fast, fully in-process generation on an NVIDIA GPU.
 
+`llama-cpp-python` is listed in `pyproject.toml` and installed automatically by
+`uv sync`. However, building it with CUDA support requires the MSVC compiler and
+CUDA Toolkit to be available in the environment.
+
 ### Prerequisites
 
 - An NVIDIA GPU with a recent driver (CUDA 12.x).
+- CUDA Toolkit 12.x (e.g. at `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6`).
+- Visual Studio 2022 (MSVC) with the C++ build tools.
+- CMake >= 3.29 and Ninja (install via `uv pip install cmake ninja` if needed).
 
-### Install
+### Install (CUDA build)
 
-Prebuilt CUDA 12.4 wheels are available for Python 3.12. Install with:
+Use the provided `build_llama_uv.bat` script, which loads the MSVC environment,
+sets the CUDA build flags, and runs `uv sync`:
 
-```bash
-uv pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+```bat
+build_llama_uv.bat
+```
+
+Or set the environment variables manually before running `uv sync`:
+
+```bat
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6
+set CUDACXX=nvcc
+set CMAKE_GENERATOR=Ninja
+set CMAKE_ARGS=-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=89
+uv sync
 ```
 
 ### Verify
@@ -91,12 +110,22 @@ See `models/_add_gguf_models_here.txt` for detailed instructions. Recommended mo
 - **Qwen2.5 7B Instruct** (strong JSON/structured output) — https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF
 - **Llama 3.2 3B Instruct** (latency-first, ~3 GB VRAM) — https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF
 
-### Vosk Speech Recognition Models
+### Speech Recognition Models
 
-Download Vosk models for voice recognition functionality from:
-https://alphacephei.com/vosk/models
+The app supports two STT engines, selectable at runtime from the Speech
+Recognition tab:
 
-See `vosk_models/_add_vosk_models_here.txt` for detailed instructions. Recommended models:
-- **vosk-model-small-en-us-0.15** (40 MB) - Lightweight
+- **Vosk** (default, CPU-based): Download Vosk models from
+  https://alphacephei.com/vosk/models and extract them into the `vosk_models/`
+  directory. See `vosk_models/_add_vosk_models_here.txt` for details.
+  Recommended: **vosk-model-small-en-us-0.15** (40 MB).
 
-Download and extract the model(s) directly into the `vosk_models/` directory.
+- **Whisper** (via `faster-whisper`, GPU-accelerated): Models are downloaded
+  automatically from HuggingFace on first use. Available sizes: `tiny.en`,
+  `base.en`, `small.en`, `medium.en`. Select the model size from the dropdown
+  in the Speech Recognition tab. For faster downloads and higher rate limits,
+  create a `.env` file (see `.env.example`) with a HuggingFace token:
+  ```
+  HF_TOKEN=hf_your_token_here
+  ```
+  Get a free read-only token at https://huggingface.co/settings/tokens.

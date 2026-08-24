@@ -127,6 +127,22 @@ class GameBase(ABC):
         """
         return {}
 
+    def get_stt_vocabulary(self) -> list[str]:
+        """Return domain vocabulary for speech recognition biasing.
+
+        Override this method to supply game-specific terms (model names,
+        army names, keywords, etc.) that should be included in the Whisper
+        ``initial_prompt`` to improve recognition of proper nouns.
+
+        Returns:
+            List of vocabulary strings, or empty list if not overridden.
+
+        Example:
+            >>> def get_stt_vocabulary(self):
+            ...     return ["Winter Guard", "Khador", "Cygnar"]
+        """
+        return []
+
     def on_speech_command(self, text: str) -> None:
         """Handle speech recognition results.
 

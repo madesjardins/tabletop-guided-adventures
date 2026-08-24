@@ -14,7 +14,18 @@ dependencies = [
     "sounddevice",
     "python-levenshtein",
     "pyyaml",
+    "faster-whisper",
+    "llama-cpp-python",
 ]
 
 [tool.uv]
 package = false
+
+# llama-cpp-python needs CUDA build flags. Set environment variables before
+# running `uv sync` on a fresh install:
+#   set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6
+#   set CUDACXX=nvcc
+#   set CMAKE_GENERATOR=Ninja
+#   set CMAKE_ARGS=-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=89
+[tool.uv.pip]
+no-build-isolation = true
