@@ -32,6 +32,7 @@ from .projector_manager import ProjectorManager
 from .zone_manager import ZoneManager
 from .speech_recognition import SpeechRecognizer, WhisperSpeechRecognizer
 from .narrator import Narrator
+from .sound_mixer import Channel
 from .llm_client import LLMClient, LLMConfig
 from .game_loader import GameLoader, GameInfo
 from .game_base import GameBase
@@ -102,6 +103,9 @@ class MainCore(QtCore.QObject):
         self.whisper_language: str = "en"
         # Domain vocabulary for Whisper initial_prompt (built from game DB)
         self._stt_vocabulary: str = ""
+        # Narrator echo suppression: ignore final STT results while the
+        # narrator's VOICE channel is actively playing audio.
+        # Stateless check — no grace period, no stuck state.
 
         # Narrator (TTS and audio)
         self.narrator = Narrator()
@@ -165,7 +169,7 @@ class MainCore(QtCore.QObject):
 
         # Rough token estimate: ~1.3 tokens per word.
         max_words = int(MAX_TOKENS / 1.3)
-        vocab = ", ".join(unique_words[:max_words])
+        vocab = " ".join(unique_words[:max_words])
         self._stt_vocabulary = vocab
         # If a Whisper recognizer is already running, update its prompt.
         if isinstance(self.speech_recognizer, WhisperSpeechRecognizer):
@@ -227,9 +231,17 @@ class MainCore(QtCore.QObject):
         The help agent is checked *before* normal game routing so that the
         wake phrase ("Help me...") works in both the main menu and in-game.
 
+        Narrator echo suppression: if the narrator's VOICE channel is busy
+        or was busy within the grace period, the result is discarded to
+        avoid feeding the narrator's own speech back into the game.
+
         Args:
             text: Recognized text.
         """
+        # Narrator echo suppression.
+        if self._is_narrator_active():
+            return
+
         # Emit signal for UI and other listeners
         self.speech_final_result.emit(text)
 
@@ -240,6 +252,10 @@ class MainCore(QtCore.QObject):
         # Pass to current game if loaded
         if self.current_game:
             self.current_game.on_speech_command(text)
+
+    def _is_narrator_active(self) -> bool:
+        """Check if the narrator's VOICE channel is currently playing audio."""
+        return self.narrator.is_channel_busy(Channel.VOICE)
 
     def set_llm_model(
         self, model_path: Optional[str], n_gpu_layers: int = -1
