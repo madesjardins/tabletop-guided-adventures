@@ -148,13 +148,17 @@ player replies -> NarrationEngine.parse_intent(...) -> {intent: set_game_type, v
 
 ### Already in the stack (no change)
 
-- TTS: `piper-tts`; STT: `vosk`; UI: `pyside6` — all in `requirements.txt`.
-  Vosk / Piper are CPU / small, so they will not fight the LLM for VRAM.
+- TTS: `piper-tts`; STT: `vosk` + `faster-whisper`; UI: `pyside6` — all in
+  `pyproject.toml`. Vosk / Piper are CPU / small, so they will not fight the
+  LLM for VRAM. Whisper (faster-whisper) can use GPU but is lightweight
+  compared to the LLM.
 
-### `requirements.txt` additions
+### `pyproject.toml` dependencies
 
-- For Ollama backend: `ollama` (or `httpx`).
-- For llama-cpp backend (if chosen): `llama-cpp-python`.
+- `llama-cpp-python` — included in `pyproject.toml`, built from source with
+  CUDA support (see `build_llama_uv.bat`).
+- `faster-whisper` — included in `pyproject.toml`, installed as a normal wheel.
+- For an alternative Ollama backend (not currently used): `ollama` or `httpx`.
 
 ### Model selection & portability (cross-machine)
 

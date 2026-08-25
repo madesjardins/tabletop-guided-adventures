@@ -30,8 +30,9 @@ from .camera_manager import CameraManager
 from .camera_calibration import CameraCalibration
 from .projector_manager import ProjectorManager
 from .zone_manager import ZoneManager
-from .speech_recognition import SpeechRecognizer
+from .speech_recognition import SpeechRecognizer, WhisperSpeechRecognizer
 from .narrator import Narrator
+from .sound_mixer import Channel
 from .llm_client import LLMClient, LLMConfig
 from .game_loader import GameLoader, GameInfo
 from .game_base import GameBase
@@ -93,6 +94,18 @@ class MainCore(QtCore.QObject):
         self.speech_model_path: Optional[str] = None
         self.speech_device_index: Optional[int] = None
         self.speech_threshold: float = 0.7
+        # STT engine: "vosk" or "whisper"
+        self.stt_engine: str = "vosk"
+        # Whisper-specific config
+        self.whisper_model_size: str = "small.en"
+        self.whisper_device: str = "auto"
+        self.whisper_compute_type: str = "auto"
+        self.whisper_language: str = "en"
+        # Domain vocabulary for Whisper initial_prompt (built from game DB)
+        self._stt_vocabulary: str = ""
+        # Narrator echo suppression: ignore final STT results while the
+        # narrator's VOICE channel is actively playing audio.
+        # Stateless check — no grace period, no stuck state.
 
         # Narrator (TTS and audio)
         self.narrator = Narrator()
@@ -123,13 +136,57 @@ class MainCore(QtCore.QObject):
         self.current_game: Optional[GameBase] = None
         self.current_game_info: Optional[GameInfo] = None
 
+    def set_stt_vocabulary(self, names: list[str]) -> None:
+        """Set domain vocabulary for Whisper's initial_prompt.
+
+        Called when a game loads (or its model database changes) to bias
+        Whisper recognition toward known model names, army names, keywords,
+        and other game-specific terms.
+
+        Uses word-level deduplication: "Winter Guard Infantry" and
+        "Winter Guard Rifle Corps" contribute "Winter", "Guard", "Infantry",
+        "Rifle", "Corps" — each word only once.  This maximises vocabulary
+        coverage within Whisper's ~224 token limit.
+
+        Args:
+            names: List of vocabulary terms (model names, army names, etc.).
+        """
+        # Whisper initial_prompt has a ~224 token limit.
+        # We use word-level deduplication to maximise coverage.
+        MAX_TOKENS = 200
+        seen_words: set[str] = set()
+        unique_words: list[str] = []
+
+        for name in names:
+            name = name.strip()
+            if not name:
+                continue
+            for word in name.split():
+                word_lower = word.lower()
+                if word_lower not in seen_words:
+                    seen_words.add(word_lower)
+                    unique_words.append(word)
+
+        # Rough token estimate: ~1.3 tokens per word.
+        max_words = int(MAX_TOKENS / 1.3)
+        vocab = " ".join(unique_words[:max_words])
+        self._stt_vocabulary = vocab
+        # If a Whisper recognizer is already running, update its prompt.
+        if isinstance(self.speech_recognizer, WhisperSpeechRecognizer):
+            self.speech_recognizer._initial_prompt = vocab
+
     def update_speech_recognizer(
         self, model_path: Optional[str] = None, device_index: Optional[int] = None
     ) -> None:
         """Update speech recognizer with new configuration.
 
+        For Vosk, *model_path* is the path to the Vosk model directory.
+        For Whisper, *model_path* is the model size (e.g. "small.en").
+        The engine is selected by :attr:`stt_engine` ("vosk" or "whisper").
+
         Args:
-            model_path: Path to Vosk model (None to keep current).
+            model_path: Path to Vosk model or Whisper model size
+                (None to keep current).
             device_index: Audio device index (None to keep current).
         """
         # Update configuration
@@ -146,10 +203,20 @@ class MainCore(QtCore.QObject):
         # Start new recognizer if we have both model and device
         if self.speech_model_path and self.speech_device_index is not None:
             try:
-                self.speech_recognizer = SpeechRecognizer(
-                    model_path=self.speech_model_path,
-                    device_index=self.speech_device_index
-                )
+                if self.stt_engine == "whisper":
+                    self.speech_recognizer = WhisperSpeechRecognizer(
+                        model_size=self.speech_model_path,
+                        device_index=self.speech_device_index,
+                        initial_prompt=self._stt_vocabulary,
+                        device=self.whisper_device,
+                        compute_type=self.whisper_compute_type,
+                        language=self.whisper_language,
+                    )
+                else:
+                    self.speech_recognizer = SpeechRecognizer(
+                        model_path=self.speech_model_path,
+                        device_index=self.speech_device_index,
+                    )
                 self.speech_recognizer.partial_result.connect(self.speech_partial_result.emit)
                 self.speech_recognizer.final_result.connect(self._on_speech_final_result)
                 self.speech_recognizer.start()
@@ -164,9 +231,17 @@ class MainCore(QtCore.QObject):
         The help agent is checked *before* normal game routing so that the
         wake phrase ("Help me...") works in both the main menu and in-game.
 
+        Narrator echo suppression: if the narrator's VOICE channel is busy
+        or was busy within the grace period, the result is discarded to
+        avoid feeding the narrator's own speech back into the game.
+
         Args:
             text: Recognized text.
         """
+        # Narrator echo suppression.
+        if self._is_narrator_active():
+            return
+
         # Emit signal for UI and other listeners
         self.speech_final_result.emit(text)
 
@@ -177,6 +252,10 @@ class MainCore(QtCore.QObject):
         # Pass to current game if loaded
         if self.current_game:
             self.current_game.on_speech_command(text)
+
+    def _is_narrator_active(self) -> bool:
+        """Check if the narrator's VOICE channel is currently playing audio."""
+        return self.narrator.is_channel_busy(Channel.VOICE)
 
     def set_llm_model(
         self, model_path: Optional[str], n_gpu_layers: int = -1
@@ -292,6 +371,8 @@ class MainCore(QtCore.QObject):
         # Call game's on_load
         try:
             self.current_game.on_load()
+            # Feed game vocabulary to the STT engine for recognition biasing.
+            self.set_stt_vocabulary(self.current_game.get_stt_vocabulary())
             self.game_loaded.emit(game_info.name)
             return True
         except Exception as e:

@@ -648,9 +648,15 @@ class MainWindow(QtWidgets.QMainWindow):
         config_group.setMaximumWidth(350)
         config_layout = QtWidgets.QFormLayout(config_group)
 
-        # Vosk model combo box
+        # STT engine selector
+        self.stt_engine_combo = QtWidgets.QComboBox()
+        self.stt_engine_combo.addItem("Vosk", "vosk")
+        self.stt_engine_combo.addItem("Whisper (faster-whisper)", "whisper")
+        config_layout.addRow("STT Engine:", self.stt_engine_combo)
+
+        # Model combo box (populated based on engine selection)
         self.speech_model_combo = QtWidgets.QComboBox()
-        config_layout.addRow("Vosk Model:", self.speech_model_combo)
+        config_layout.addRow("Model:", self.speech_model_combo)
 
         # Audio device combo box
         self.speech_device_combo = QtWidgets.QComboBox()
@@ -684,13 +690,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         main_layout.addWidget(results_group)
 
-        # Populate vosk models
-        self._populate_vosk_models()
+        # Populate models for default engine
+        self._populate_speech_models()
 
         # Populate audio devices
         self._populate_audio_devices()
 
         # Connect signals
+        self.stt_engine_combo.currentIndexChanged.connect(self._on_stt_engine_changed)
         self.speech_model_combo.currentIndexChanged.connect(self._on_speech_model_changed)
         self.speech_device_combo.currentIndexChanged.connect(self._on_speech_device_changed)
         self.speech_threshold_spinbox.valueChanged.connect(self._on_speech_threshold_changed)
@@ -708,21 +715,39 @@ class MainWindow(QtWidgets.QMainWindow):
 
         return widget
 
-    def _populate_vosk_models(self) -> None:
-        """Populate the vosk model combo box with available models."""
-        import os
-
-        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        vosk_models_path = os.path.join(root_dir, "vosk_models")
-
+    def _populate_speech_models(self) -> None:
+        """Populate the model combo box based on the selected STT engine."""
+        engine = self.stt_engine_combo.currentData() or "vosk"
         self.speech_model_combo.clear()
 
-        if os.path.exists(vosk_models_path):
-            models = [d for d in os.listdir(vosk_models_path)
-                      if os.path.isdir(os.path.join(vosk_models_path, d))]
-            for model in sorted(models):
-                model_path = os.path.join(vosk_models_path, model)
-                self.speech_model_combo.addItem(model, model_path)
+        if engine == "whisper":
+            for name in ("tiny.en", "base.en", "small.en", "medium.en", "large-v3", "large-v3-turbo"):
+                self.speech_model_combo.addItem(name, name)
+        else:
+            import os
+            root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            vosk_models_path = os.path.join(root_dir, "vosk_models")
+            if os.path.exists(vosk_models_path):
+                models = [d for d in os.listdir(vosk_models_path)
+                          if os.path.isdir(os.path.join(vosk_models_path, d))]
+                for model in sorted(models):
+                    model_path = os.path.join(vosk_models_path, model)
+                    self.speech_model_combo.addItem(model, model_path)
+
+    @QtCore.Slot(int)
+    def _on_stt_engine_changed(self, index: int) -> None:
+        """Handle STT engine selection change."""
+        if index < 0:
+            return
+        engine = self.stt_engine_combo.itemData(index)
+        self.core.stt_engine = engine
+        # Repopulate model list for the new engine
+        self._populate_speech_models()
+        # If a model is available, update the recognizer
+        if self.speech_model_combo.count() > 0:
+            model_path = self.speech_model_combo.itemData(0)
+            if model_path:
+                self.core.update_speech_recognizer(model_path=model_path)
 
     def _populate_audio_devices(self) -> None:
         """Populate the audio device combo box with available devices."""
@@ -3951,6 +3976,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # Get speech recognition configuration
             speech_config = {
+                'stt_engine': self.core.stt_engine,
                 'model_path': self.core.speech_model_path,
                 'device_index': self.core.speech_device_index,
                 'device_name': None,
@@ -4309,7 +4335,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.speech_threshold_spinbox.setValue(threshold)
                 self.speech_threshold_spinbox.blockSignals(False)
 
-                # Load and match vosk model
+                # Load STT engine
+                saved_engine = speech_config.get('stt_engine', 'vosk')
+                self.core.stt_engine = saved_engine
+                engine_idx = self.stt_engine_combo.findData(saved_engine)
+                if engine_idx >= 0:
+                    self.stt_engine_combo.blockSignals(True)
+                    self.stt_engine_combo.setCurrentIndex(engine_idx)
+                    self.stt_engine_combo.blockSignals(False)
+                    # Repopulate models for the restored engine
+                    self._populate_speech_models()
+
+                # Load and match speech model
                 saved_model_path = speech_config.get('model_path')
                 if saved_model_path:
                     model_index = self._find_matching_vosk_model(saved_model_path)
