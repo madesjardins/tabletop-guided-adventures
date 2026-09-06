@@ -326,7 +326,7 @@ class SpeechRecognizer(QObject):
                     text = result.get('text', '').strip()
                     if text in ["huh", "hum", "ah", "ha"]:  # Ignore these common words
                         continue
-                    if text:
+                    if text and not has_excessive_repetition(text):
                         self.final_result.emit(text)
                 else:
                     # Partial result (during speech)
@@ -354,6 +354,45 @@ class SpeechRecognizer(QObject):
 _LEADING_ARTICLES = re.compile(r"^\s*(the|a|an)\s+", re.IGNORECASE)
 _TRAILING_ARTICLES = re.compile(r"\s+(the|a|an)\s*$", re.IGNORECASE)
 _FILLER_WORDS = {"uh", "um", "huh", "hum", "ah", "ha", "er", "mm", "hmm"}
+_WORD_RE = re.compile(r"\w+")
+
+
+def has_excessive_repetition(text: str, max_repeats: int = 4) -> bool:
+    """Detect degenerate repeated-word/phrase hallucinations.
+
+    Whisper (and occasionally Vosk) can hallucinate on noise or silence by
+    producing output like "Thank you. Thank you. Thank you. ..." or
+    "three all all all all all all". Since spoken answers in this app are
+    normally short, a 1-, 2-, or 3-word phrase repeated consecutively more
+    than *max_repeats* times is almost certainly a hallucination rather
+    than genuine speech.
+
+    Args:
+        text: Recognized text to check.
+        max_repeats: Maximum allowed consecutive repeats of any 1-3 word
+            phrase before the text is considered degenerate.
+
+    Returns:
+        True if *text* looks like a repetition hallucination.
+    """
+    words = _WORD_RE.findall(text.lower())
+    n_words = len(words)
+    if n_words < max_repeats + 1:
+        return False
+
+    for n in (1, 2, 3):
+        i = 0
+        while i + n <= n_words:
+            phrase = words[i:i + n]
+            repeats = 1
+            j = i + n
+            while j + n <= n_words and words[j:j + n] == phrase:
+                repeats += 1
+                j += n
+            if repeats > max_repeats:
+                return True
+            i = j if repeats > 1 else i + 1
+    return False
 
 
 def clean_transcript(text: str) -> str:
@@ -704,7 +743,7 @@ class WhisperSpeechRecognizer(QObject):
                     return
                 # Strip trailing punctuation that Whisper often appends.
                 text = text.rstrip(".!?,\"'")
-                if text:
+                if text and not has_excessive_repetition(text):
                     self.final_result.emit(text)
         except Exception as e:
             if self._is_running:
