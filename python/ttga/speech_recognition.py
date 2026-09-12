@@ -324,9 +324,7 @@ class SpeechRecognizer(QObject):
                     # Final result (after silence)
                     result = json.loads(self._recognizer.Result())
                     text = result.get('text', '').strip()
-                    if text in ["huh", "hum", "ah", "ha"]:  # Ignore these common words
-                        continue
-                    if text and not has_excessive_repetition(text):
+                    if text and not is_junk_transcript(text):
                         self.final_result.emit(text)
                 else:
                     # Partial result (during speech)
@@ -355,6 +353,48 @@ _LEADING_ARTICLES = re.compile(r"^\s*(the|a|an)\s+", re.IGNORECASE)
 _TRAILING_ARTICLES = re.compile(r"\s+(the|a|an)\s*$", re.IGNORECASE)
 _FILLER_WORDS = {"uh", "um", "huh", "hum", "ah", "ha", "er", "mm", "hmm"}
 _WORD_RE = re.compile(r"\w+")
+
+# Canned phrases Whisper hallucinates on silence or background noise
+# (subtitle-style outputs). Compared word-by-word after normalization,
+# so punctuation and bracketed forms like "[Music]" also match.
+_HALLUCINATION_PHRASES = [
+    _WORD_RE.findall(p)
+    for p in (
+        "thank you",
+        "thanks",
+        "thanks for watching",
+        "thank you for watching",
+        "thank you very much",
+        "thank you so much",
+        "bye",
+        "bye bye",
+        "goodbye",
+        "see you",
+        "see you later",
+        "see you next time",
+        "i'll see you next time",
+        "the end",
+        "the",
+        "you",
+        "subscribe",
+        "please subscribe",
+        "like and subscribe",
+        "don't forget to subscribe",
+        "sorry",
+        "i'm sorry",
+        "excuse me",
+        "music",
+        "music playing",
+        "applause",
+        "laughter",
+        "laughing",
+        "silence",
+        "foreign",
+        "subtitles",
+        "captions",
+    )
+    if _WORD_RE.findall(p)
+]
 
 
 def has_excessive_repetition(text: str, max_repeats: int = 4) -> bool:
@@ -393,6 +433,110 @@ def has_excessive_repetition(text: str, max_repeats: int = 4) -> bool:
                 return True
             i = j if repeats > 1 else i + 1
     return False
+
+
+def is_junk_transcript(text: str) -> bool:
+    """Return True for STT output that is never a useful game command.
+
+    Filters out well-known Whisper hallucinations on silence or noise
+    ("Thank you.", "Thanks for watching!", "[Music]"), utterances made
+    of a single repeated word ("the the the"), filler-only output
+    ("um, uh"), punctuation-only output, and degenerate repetitions
+    (see :func:`has_excessive_repetition`).
+
+    Args:
+        text: Recognized text to check.
+
+    Returns:
+        True if *text* should be dropped rather than emitted.
+    """
+    words = _WORD_RE.findall(text.lower())
+    if not words:
+        return True
+
+    # Filler-only utterance ("um, uh, hmm").
+    if set(words).issubset(_FILLER_WORDS):
+        return True
+
+    # A single word repeated for the whole utterance ("the the the").
+    if len(words) > 1 and len(set(words)) == 1:
+        return True
+
+    # A canned hallucination phrase, possibly repeated consecutively
+    # ("thank you", "thank you thank you", "thanks for watching").
+    for phrase in _HALLUCINATION_PHRASES:
+        n = len(phrase)
+        if len(words) % n == 0 and all(
+            words[i:i + n] == phrase for i in range(0, len(words), n)
+        ):
+            return True
+
+    # Utterance dominated by repeated n-grams is degenerate, e.g.
+    # "and remove the and remove the so so so".
+    if len(words) >= 4 and _repeated_ngram_coverage(words) >= 0.5:
+        return True
+
+    # Commands in this app are a few words at most; a long rambling
+    # utterance is a hallucination.
+    if len(words) > 20:
+        return True
+
+    # Any word or short phrase occurring 3+ times anywhere — not just
+    # consecutively — marks degenerate output, e.g. "...the garden...
+    # the garden... remove the garden..." scattered through a sentence.
+    for n in (1, 2, 3):
+        counts: dict[tuple, int] = {}
+        for i in range(len(words) - n + 1):
+            gram = tuple(words[i:i + n])
+            counts[gram] = counts.get(gram, 0) + 1
+            if counts[gram] >= 3:
+                return True
+
+    return has_excessive_repetition(text)
+
+
+def _repeated_ngram_coverage(
+    words: list[str], max_n: Optional[int] = None
+) -> float:
+    """Fraction of *words* covered by consecutively repeated n-grams.
+
+    For each n in 1..*max_n*, finds maximal runs where the same n-word
+    phrase occurs at least twice in a row and marks every word position
+    those runs span.  E.g. for "and remove the and remove the so so so",
+    the 3-gram "and remove the" repeats twice and "so" three times, so
+    the coverage is 1.0.
+
+    Args:
+        words: Tokenized, lowercased utterance.
+        max_n: Longest phrase length (in words) considered. Defaults to
+            ``len(words) // 2`` so a repeated phrase of any size counts —
+            e.g. "Christopher Gale of the church Christopher Gale of the
+            church" (a 5-word phrase said twice).
+
+    Returns:
+        Ratio between 0.0 and 1.0 of word positions inside a repeat run.
+    """
+    n_words = len(words)
+    if max_n is None:
+        max_n = max(1, n_words // 2)
+    covered = [False] * n_words
+    for n in range(1, max_n + 1):
+        i = 0
+        while i + 2 * n <= n_words:
+            phrase = words[i:i + n]
+            count = 1
+            while (
+                i + (count + 1) * n <= n_words
+                and words[i + count * n:i + (count + 1) * n] == phrase
+            ):
+                count += 1
+            if count >= 2:
+                for k in range(i, i + count * n):
+                    covered[k] = True
+                i += count * n
+            else:
+                i += 1
+    return sum(covered) / n_words
 
 
 def clean_transcript(text: str) -> str:
@@ -736,15 +880,10 @@ class WhisperSpeechRecognizer(QObject):
                 kwargs["initial_prompt"] = self._initial_prompt
             segments, _ = self._model.transcribe(audio, **kwargs)
             text = " ".join(s.text.strip() for s in segments).strip()
-            if text:
-                # Strip common filler-only results
-                words = set(text.lower().split())
-                if words and words.issubset(_FILLER_WORDS):
-                    return
-                # Strip trailing punctuation that Whisper often appends.
-                text = text.rstrip(".!?,\"'")
-                if text and not has_excessive_repetition(text):
-                    self.final_result.emit(text)
+            # Strip trailing punctuation that Whisper often appends.
+            text = text.rstrip(".!?,\"'")
+            if text and not is_junk_transcript(text):
+                self.final_result.emit(text)
         except Exception as e:
             if self._is_running:
                 self.error_occurred.emit(f"Transcription error: {e}")
